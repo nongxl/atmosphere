@@ -251,71 +251,74 @@ void Renderer::drawSkyBackground(float extTemp) {
 void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, float densityThreshold) {
     int drawBudget = 55;
 
-    // 自适应空间采样步长：云量越丰沛，在全空间进行越稀疏的跨步采样，防止预算在高空被过早耗尽导致底层失去 IMU 响应
-    int activeCloud = sim.getActiveCloudCount();
-    int baseStride = 1;
-    if (activeCloud > 850) {
-        baseStride = 3; // 极密云层，大步长采样
-    } else if (activeCloud > 220) {
-        baseStride = 2; // 密云层，中步长采样
+    // 1. 动态视口自适应循环方向选择（Loop Order）
+    // 依据相机的 azimuth (偏航角) 的余弦与正弦正负号，决定循环是由大到小还是由小到大遍历。
+    // 强制先绘制离相机最近的最前排云（Front-to-Back），让 55 帧粒子预算完全分配给当前偏转视角下最靠近观众的体积云层。
+    int xStart = 0, xEnd = AtmosphereSimulation::X_SIZE, xStep = 1;
+    int yStart = 0, yEnd = AtmosphereSimulation::Y_SIZE, yStep = 1;
+
+    if (cam._cachedCosA > 0.0f) {
+        xStart = AtmosphereSimulation::X_SIZE - 1;
+        xEnd = -1;
+        xStep = -1;
+    }
+    if (cam._cachedSinA > 0.0f) {
+        yStart = AtmosphereSimulation::Y_SIZE - 1;
+        yEnd = -1;
+        yStep = -1;
     }
 
-    // 从高层往低层画（画家算法：近处/低处的云后画，覆盖远处/高处的云）
+    // 从最高层往低层画（z 轴从近到远）
     for (int z = AtmosphereSimulation::Z_SIZE - 1; z >= 0 && drawBudget > 0; --z) {
-        // z 轴高度方向跨步采样：当 Stride >= 2 时，跳过奇数层，保证中低层云块有预算能够投影展现
-        if (baseStride >= 2 && (z % 2 != 0)) continue;
-
-        // 水平空间步长，低空云层保持精细，高空层根据自适应 Stride 跨步
-        int layerStride = (z > 3) ? baseStride : 1;
-
-        for (int y = 0; y < AtmosphereSimulation::Y_SIZE && drawBudget > 0; y += layerStride) {
-            for (int x = 0; x < AtmosphereSimulation::X_SIZE && drawBudget > 0; x += layerStride) {
+        // 恢复 baseStride = 1 精细采样，令粒子重新贴合重叠，恢复松软庞大的云团质感
+        for (int y = yStart; y != yEnd && drawBudget > 0; y += yStep) {
+            for (int x = xStart; x != xEnd && drawBudget > 0; x += xStep) {
                 // 读取物理密度
                 float d = sampleDensity(sim, x, y, z);
                 if (d <= densityThreshold) continue;
 
-                // Small random jitter to break regular grid appearance
-                float jitterX = ((float)random(200) / 100.0f - 1.0f) * 0.3f; // -0.3 ~ 0.3
-                float jitterY = ((float)random(200) / 100.0f - 1.0f) * 0.3f;
+                // 增加少量随机抖动打破网格规律感
+                float jitterX = ((float)random(200) / 100.0f - 1.0f) * 0.25f;
+                float jitterY = ((float)random(200) / 100.0f - 1.0f) * 0.25f;
                 int sx, sy;
                 cam.project((float)x + 0.5f + jitterX, (float)y + 0.5f + jitterY, (float)z + 0.5f, sx, sy);
 
-                // Cull off‑screen clouds early
+                // 屏幕投影剔除
                 if (sx < -15 || sx > SCREEN_W + 15 || sy < -15 || sy > SKY_AREA_H + 15) continue;
 
                 const AirCell& cell = sim.getCell(x, y, z);
-                // Base radius proportional to smoothed density
+                // 云粒子投影半径
                 float r = cam.scale * (0.35f + d * 0.85f);
                 if (r < 1.5f) r = 1.5f;
 
-                // Light intensity – same colour logic as before
+                // 光照强度计算与色彩插值
                 float li = cell.lightIntensity;
                 uint8_t r_light = 242, g_light = 242, b_light = 248;
                 uint8_t r_dark = 58, g_dark = 62, b_dark = 82;
                 uint8_t cr = (uint8_t)(r_dark + (r_light - r_dark) * li);
                 uint8_t cg = (uint8_t)(g_dark + (g_light - g_dark) * li);
                 uint8_t cb = (uint8_t)(b_dark + (b_light - b_dark) * li);
+                
                 float zRatio = (float)z / (AtmosphereSimulation::Z_SIZE - 1);
                 cr = fminf(255, cr + zRatio * 12);
                 cg = fminf(255, cg + zRatio * 12);
                 cb = fminf(255, cb + zRatio * 8);
                 uint16_t bodyColor = RGB565(cr, cg, cb);
 
-                // Offset circles for light/shadow effect
+                // 偏心三圆模拟 3D 漫反射软阴影与银边
                 float offsetDist = r * 0.28f;
                 int ox_light = (int)roundf((float)sx + offsetDist * 0.8f);
                 int oy_light = (int)roundf((float)sy - offsetDist * 0.8f);
                 int ox_dark  = (int)roundf((float)sx - offsetDist * 0.7f);
                 int oy_dark  = (int)roundf((float)sy + offsetDist * 0.7f);
 
-                // Approximate sky colour for rim blending (sky top is deep blue, bottom is light cyan)
                 float skyT = (float)sy / (float)SKY_AREA_H;
                 uint16_t skyEst = colorInterpolate(RGB565(10, 40, 90), RGB565(130, 210, 220), skyT);
 
                 uint16_t shadowColor = RGB565((uint8_t)(cr * 0.52f), (uint8_t)(cg * 0.54f), (uint8_t)(cb * 0.65f));
                 uint16_t rimColor = colorInterpolate(RGB565(255, 252, 242), skyEst, 0.40f);
 
-                // 【核心优化】三维空间闪电发光扩散插值模型 (Mie 散射与体积照明自发光)
+                // 三维空间闪电发光扩散插值模型
                 if (_lightningFrames > 0) {
                     float intensity = _lightningFlicker[5 - _lightningFrames];
                     float dx = (float)x - _epicenterX3D;
@@ -323,12 +326,10 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                     float dz = (float)z - _epicenterZ3D;
                     float distSq = dx*dx + dy*dy + dz*dz;
                     
-                    // 指数平方衰减：离闪电源头越近光强越强
                     float lightSpread = intensity * expf(-0.022f * distSq);
                     
                     if (lightSpread > 0.05f) {
                         if (lightSpread > 0.75f) {
-                            // 近距离强光过载：使云体素直接曝光为极亮白色
                             bodyColor = RGB565(255, 255, 255);
                             rimColor = RGB565(255, 255, 255);
                             shadowColor = colorInterpolate(shadowColor, _lightningColor, 0.6f);

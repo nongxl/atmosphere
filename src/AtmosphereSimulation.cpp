@@ -64,9 +64,9 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
     if (extMicDb > 65.0f) {
         float micRatio = (extMicDb - 65.0f) / 35.0f;
         if (micRatio > 1.0f) micRatio = 1.0f;
-        _typhoonGrowth += micRatio * 0.22f * dt; // 蓄能
+        _typhoonGrowth += micRatio * 0.052f * dt; // 蓄能 (约需持续吹风 5-7 秒完全成熟)
     } else {
-        _typhoonGrowth -= 0.038f * dt; // 耗散
+        _typhoonGrowth -= 0.015f * dt; // 耗散 (减缓衰减)
     }
     if (_typhoonGrowth < 0.0f) _typhoonGrowth = 0.0f;
     if (_typhoonGrowth > 1.0f) _typhoonGrowth = 1.0f;
@@ -227,6 +227,55 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
                 next.velocityX = clampV(next.velocityX);
                 next.velocityY = clampV(next.velocityY);
                 next.velocityZ = clampV(next.velocityZ);
+            }
+        }
+    }
+    memcpy(_cells, _nextCells, sizeof(AirCell) * X_SIZE * Y_SIZE * Z_SIZE);
+
+    // ─── 4c. Upwind Advection (上风平流输送：水汽与云密度受风速流动推着走) ───
+    memcpy(_nextCells, _cells, sizeof(AirCell) * X_SIZE * Y_SIZE * Z_SIZE);
+    for (int z = 0; z < Z_SIZE; z++) {
+        for (int y = 0; y < Y_SIZE; y++) {
+            for (int x = 0; x < X_SIZE; x++) {
+                const AirCell& cur = getCell(x, y, z);
+                AirCell& next = _nextCells[z * X_SIZE * Y_SIZE + y * X_SIZE + x];
+
+                float vx = cur.velocityX * dt;
+                float vy = cur.velocityY * dt;
+                float vz = cur.velocityZ * dt;
+
+                // X 方向平流
+                if (vx > 0.0f && x > 0) {
+                    float contrib = vx;
+                    next.cloudDensity += contrib * (getCell(x - 1, y, z).cloudDensity - cur.cloudDensity);
+                    next.vapor        += contrib * (getCell(x - 1, y, z).vapor - cur.vapor);
+                } else if (vx < 0.0f && x < X_SIZE - 1) {
+                    float contrib = -vx;
+                    next.cloudDensity += contrib * (getCell(x + 1, y, z).cloudDensity - cur.cloudDensity);
+                    next.vapor        += contrib * (getCell(x + 1, y, z).vapor - cur.vapor);
+                }
+
+                // Y 方向平流
+                if (vy > 0.0f && y > 0) {
+                    float contrib = vy;
+                    next.cloudDensity += contrib * (getCell(x, y - 1, z).cloudDensity - cur.cloudDensity);
+                    next.vapor        += contrib * (getCell(x, y - 1, z).vapor - cur.vapor);
+                } else if (vy < 0.0f && y < Y_SIZE - 1) {
+                    float contrib = -vy;
+                    next.cloudDensity += contrib * (getCell(x, y + 1, z).cloudDensity - cur.cloudDensity);
+                    next.vapor        += contrib * (getCell(x, y + 1, z).vapor - cur.vapor);
+                }
+
+                // Z 方向平流 (垂直对流输送)
+                if (vz > 0.0f && z > 0) {
+                    float contrib = vz;
+                    next.cloudDensity += contrib * (getCell(x, y, z - 1).cloudDensity - cur.cloudDensity);
+                    next.vapor        += contrib * (getCell(x, y, z - 1).vapor - cur.vapor);
+                } else if (vz < 0.0f && z < Z_SIZE - 1) {
+                    float contrib = -vz;
+                    next.cloudDensity += contrib * (getCell(x, y, z + 1).cloudDensity - cur.cloudDensity);
+                    next.vapor        += contrib * (getCell(x, y, z + 1).vapor - cur.vapor);
+                }
             }
         }
     }
