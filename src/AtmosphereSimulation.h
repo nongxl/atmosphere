@@ -10,6 +10,8 @@ struct AirCell {
     float velocityZ;     // 风速 Z
     float pressure;      // 气压 (hPa)
     float lightIntensity;// 光照照度 (0.0 ~ 1.0)
+    float posCharge;     // 正电荷密度
+    float negCharge;     // 负电荷密度
 };
 
 class AtmosphereSimulation {
@@ -62,7 +64,22 @@ private:
     int   _activeCloudCount; // 活跃云粒子统计
     float _typhoonGrowth;    // 台风成长进度 (0.0~1.0)
 
+    // 温度逆温层参数
+    float _inversionBaseZ;   // 逆温层起始高度
+    float _inversionStrength;// 逆温强度
+
+    // 随机风参数
+    float _globalWindDir;    // 全局风向 (0~2PI)
+    float _globalWindSpeed;  // 全局风速
+    float _windShearX;       // X方向垂直风切变
+    float _windShearY;       // Y方向垂直风切变
+
+    // 电荷分离相关
+    float _maxChargeSeparation; // 最大电荷分离度
+
     void computeLightField();
+    void computeTemperatureProfile(float initTemp);
+    void computeChargeSeparation(float dt);
 
     inline AirCell& getCellRef(int x, int y, int z) {
         return _cells[z * X_SIZE * Y_SIZE + y * X_SIZE + x];

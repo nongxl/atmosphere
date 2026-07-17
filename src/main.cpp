@@ -97,36 +97,44 @@ void loop() {
     if (dt < 0.001f) dt = 0.001f;
     if (dt > 0.1f)   dt = 0.1f;
 
-    // 2.5 IMU 相机控制（带低通滤波防抖，绝对角度绑定模型，手势与视角绝对同步）
+    // 2.5 IMU 相机控制（透过窗户观察：设备倾斜控制视角旋转）
     {
-        // 必须周期性更新 IMU 状态寄存器，否则底层 Accel 缓存永远为 0
         M5.Imu.update();
 
+        static float imuX = 0.0f;
+        static float imuY = 0.0f;
+        static float imuZ = 1.0f;
+
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
-        // 使用 if 结构对获取函数做安全防卡死校验，当且仅当硬件返回成功时更新视角
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
-            // 估计 roll/pitch：ax, ay 已经是 G (1G ≈ 1.0f) 为单位，平放时基准本就是 0.0，故直接使用
-            float rawRoll  = ax;          // 左右倾斜
-            float rawPitch = ay;          // 前后倾斜
+            // 竖屏映射：屏幕X=设备Y, 屏幕Y=设备-X (参考venom项目，调整符号)
+            float sX = ay;
+            float sY = -ax;
+            float sZ = az;
 
-            // EMA 低通滤波防抖
-            static float filtRoll  = 0.0f;
-            static float filtPitch = 0.0f;
-            const float  ALPHA     = 0.18f; // 对齐 venom 最佳滤波器平滑参数，降低跟手延迟
-            filtRoll  = filtRoll  * (1.0f - ALPHA) + rawRoll  * ALPHA;
-            filtPitch = filtPitch * (1.0f - ALPHA) + rawPitch * ALPHA;
+            // EMA 低通滤波（参考 venom 项目参数）
+            const float IMU_LPF_ALPHA = 0.92f;
+            imuX = imuX * IMU_LPF_ALPHA + sX * (1.0f - IMU_LPF_ALPHA);
+            imuY = imuY * IMU_LPF_ALPHA + sY * (1.0f - IMU_LPF_ALPHA);
+            imuZ = imuZ * IMU_LPF_ALPHA + sZ * (1.0f - IMU_LPF_ALPHA);
 
-            // 绝对角度映射绑定（全息透视视口模型：手势倾斜与视角反向运动，构成三维深度镜面）
-            camera->azimuth   = -filtRoll * 1.8f;   // 左右倾斜 (Roll) 控制水平旋转
-            float tempElev    = -filtPitch * 0.7f;  // 前后倾斜 (Pitch) 控制仰角偏移
-            camera->elevation = tempElev < -0.7f ? -0.7f : (tempElev > 0.7f ? 0.7f : tempElev);
+            // 死区处理：微小倾斜不响应，避免抖动
+            const float IMU_DEADZONE = 0.08f;
+            float effectiveX = fabsf(imuX) > IMU_DEADZONE ? imuX : 0.0f;
+            float effectiveY = fabsf(imuY) > IMU_DEADZONE ? imuY : 0.0f;
 
-            // 调试打印：检查 IMU 运行数据与映射角度
+            // G值直接映射为相机角度（范围约[-1,1] -> 弧度）
+            // 左右倾斜控制 azimuth，前后倾斜控制 elevation
+            const float MAX_AZIMUTH = 0.6f;   // 约34度
+            const float MAX_ELEVATION = 0.5f; // 约29度
+            camera->azimuth = clampF(-effectiveX * MAX_AZIMUTH, -MAX_AZIMUTH, MAX_AZIMUTH);
+            camera->elevation = clampF(-effectiveY * MAX_ELEVATION, -MAX_ELEVATION, MAX_ELEVATION);
+
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
                 lastPrintMs = millis();
-                Serial.printf("[IMU Debug] Enabled: %d | Accel X/Y/Z: %.2f, %.2f, %.2f | Filt R/P: %.2f, %.2f | Cam Azimuth: %.2f, Elev: %.2f\n",
-                              M5.Imu.isEnabled(), ax, ay, az, filtRoll, filtPitch, camera->azimuth, camera->elevation);
+                Serial.printf("[IMU] Accel: %.2f,%.2f,%.2f | IMU X/Y: %.2f,%.2f | Az/Elev: %.2f,%.2f\n",
+                              ax, ay, az, imuX, imuY, camera->azimuth, camera->elevation);
             }
         }
     }

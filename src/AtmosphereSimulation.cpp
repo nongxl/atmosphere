@@ -4,7 +4,10 @@
 #include "config.h"
 
 AtmosphereSimulation::AtmosphereSimulation()
-    : _electricCharge(0.0f), _lightningPending(false), _sunAzimuth(PI / 4.0f), _activeCloudCount(0), _typhoonGrowth(0.0f)
+    : _electricCharge(0.0f), _lightningPending(false), _sunAzimuth(PI / 4.0f), _activeCloudCount(0), _typhoonGrowth(0.0f),
+      _inversionBaseZ(4.0f), _inversionStrength(0.8f),
+      _globalWindDir(0.0f), _globalWindSpeed(0.0f), _windShearX(0.0f), _windShearY(0.0f),
+      _maxChargeSeparation(0.0f)
 {
     _cells      = new AirCell[X_SIZE * Y_SIZE * Z_SIZE];
     _nextCells  = new AirCell[X_SIZE * Y_SIZE * Z_SIZE];
@@ -32,11 +35,34 @@ AtmosphereSimulation::~AtmosphereSimulation() {
 // ─── init ──────────────────────────────────────────────────────────────────
 void AtmosphereSimulation::init(float initTemp, float initHum, float initPres) {
     _typhoonGrowth = 0.0f;
+    _electricCharge = 0.0f;
+    _lightningPending = false;
+    
+    // 随机初始化风参数
+    _globalWindDir = (random(1000) / 1000.0f) * 6.2831853f;
+    _globalWindSpeed = 0.3f + (random(500) / 1000.0f) * 0.5f;
+    _windShearX = ((random(1000) / 500.0f) - 1.0f) * 0.3f;
+    _windShearY = ((random(1000) / 500.0f) - 1.0f) * 0.3f;
+    
+    // 随机初始化逆温层参数
+    _inversionBaseZ = 3.5f + (random(400) / 100.0f);
+    _inversionStrength = 0.5f + (random(500) / 1000.0f) * 0.5f;
+
     float initVapor = initHum / 100.0f;
     for (int z = 0; z < Z_SIZE; z++) {
-        // Temperature decreases ~1.25 deg per layer; pressure drops with height
-        float targetTemp = initTemp - (z * 1.25f);
         float targetPres = initPres * (1.0f - z * 0.008f);
+        
+        // 温度剖面：含逆温层
+        float targetTemp = initTemp - (z * 1.25f);
+        float zDiff = z - _inversionBaseZ;
+        if (zDiff >= 0.0f && zDiff <= 2.5f) {
+            float invFactor = 1.0f - (zDiff / 2.5f);
+            targetTemp += zDiff * _inversionStrength * invFactor;
+        }
+        if (z >= 9) {
+            targetTemp = initTemp - 9 * 1.25f - (z - 9) * 0.5f;
+        }
+
         for (int y = 0; y < Y_SIZE; y++) {
             for (int x = 0; x < X_SIZE; x++) {
                 AirCell& cell = getCellRef(x, y, z);
@@ -48,6 +74,8 @@ void AtmosphereSimulation::init(float initTemp, float initHum, float initPres) {
                 cell.velocityZ    = 0.0f;
                 cell.pressure     = targetPres;
                 cell.lightIntensity = 1.0f;
+                cell.posCharge    = 0.0f;
+                cell.negCharge    = 0.0f;
             }
         }
     }
@@ -107,6 +135,42 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
             for (int y = 0; y < Y_SIZE; y++) {
                 AirCell& cell = getCellRef(0, y, z);
                 cell.velocityX += windForce * (1.0f - (float)z / Z_SIZE);
+            }
+        }
+    }
+
+    // 3.5 Global wind with vertical shear (全局风场与垂直风切变)
+    float windCos = cosf(_globalWindDir);
+    float windSin = sinf(_globalWindDir);
+    for (int z = 0; z < Z_SIZE; z++) {
+        float zRatio = (float)z / (Z_SIZE - 1);
+        float shearFactor = 1.0f + zRatio * 2.0f;
+        float wx = windCos * _globalWindSpeed * shearFactor + _windShearX * zRatio;
+        float wy = windSin * _globalWindSpeed * shearFactor + _windShearY * zRatio;
+        for (int y = 0; y < Y_SIZE; y++) {
+            for (int x = 0; x < X_SIZE; x++) {
+                AirCell& cell = getCellRef(x, y, z);
+                cell.velocityX += wx * dt;
+                cell.velocityY += wy * dt;
+            }
+        }
+    }
+
+    // 3.6 Update temperature profile with inversion (更新温度剖面，含逆温层)
+    for (int z = 0; z < Z_SIZE; z++) {
+        float targetTemp = extTemp - (z * 1.25f);
+        float zDiff = z - _inversionBaseZ;
+        if (zDiff >= 0.0f && zDiff <= 2.5f) {
+            float invFactor = 1.0f - (zDiff / 2.5f);
+            targetTemp += zDiff * _inversionStrength * invFactor;
+        }
+        if (z >= 9) {
+            targetTemp = extTemp - 9 * 1.25f - (z - 9) * 0.5f;
+        }
+        for (int y = 0; y < Y_SIZE; y++) {
+            for (int x = 0; x < X_SIZE; x++) {
+                AirCell& cell = getCellRef(x, y, z);
+                cell.temperature = cell.temperature * (1.0f - 0.05f * dt) + targetTemp * 0.05f * dt;
             }
         }
     }
@@ -369,8 +433,11 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
     // 6. Compute lighting (Beer-Law self-shadow)
     computeLightField();
 
-    // 7. Electric charge accumulation & Cloud counting (merged to single pass)
-    float chargeGain = 0.0f;
+    // 7. Electric charge separation & Cloud counting
+    computeChargeSeparation(dt);
+    
+    // 8. Compute total charge for lightning
+    float totalSeparation = 0.0f;
     int tempCloudCount = 0;
     for (int z = 0; z < Z_SIZE; z++) {
         for (int y = 0; y < Y_SIZE; y++) {
@@ -379,21 +446,31 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
                 if (c.cloudDensity > 0.4f) {
                     tempCloudCount++;
                 }
-                if (z >= Z_SIZE / 2) {
-                    chargeGain += c.cloudDensity * fabsf(c.velocityZ) * 0.05f;
-                }
+                float localSep = fabsf(c.posCharge - c.negCharge);
+                totalSeparation += localSep * c.cloudDensity;
             }
         }
     }
     _activeCloudCount = tempCloudCount;
 
-    _electricCharge += chargeGain * dt;
-    _electricCharge *= (1.0f - 0.01f * dt);  // natural leakage
+    _electricCharge += totalSeparation * 0.3f * dt;
+    _electricCharge *= (1.0f - 0.005f * dt);
     if (_electricCharge < 0.0f) _electricCharge = 0.0f;
 
     if (_electricCharge > LIGHTNING_CHARGE_THRESHOLD) {
         _lightningPending  = true;
         _electricCharge   *= LIGHTNING_CHARGE_DECAY;
+        
+        // 放电后减少电荷分离（保留更多以便后续闪电）
+        for (int z = 0; z < Z_SIZE; z++) {
+            for (int y = 0; y < Y_SIZE; y++) {
+                for (int x = 0; x < X_SIZE; x++) {
+                    AirCell& cell = getCellRef(x, y, z);
+                    cell.posCharge *= 0.5f;
+                    cell.negCharge *= 0.5f;
+                }
+            }
+        }
     }
 }
 
@@ -408,8 +485,7 @@ bool AtmosphereSimulation::consumeLightningEvent() {
 
 // ─── injectCyclone ─────────────────────────────────────────────────────────
 void AtmosphereSimulation::injectCyclone() {
-    // Inject rotating updraft at grid center; immediately seed cloud density
-    // at mid/upper layers so BtnA gives instant visual feedback
+    // 注入气旋：通过提供暖湿气流和强上升气流来加速云的自然形成过程
     float centerX = (X_SIZE - 1) / 2.0f;
     float centerY = (Y_SIZE - 1) / 2.0f;
 
@@ -421,32 +497,39 @@ void AtmosphereSimulation::injectCyclone() {
                 float dy   = y - centerY;
                 float dist = sqrtf(dx * dx + dy * dy);
 
-                if (dist < 5.5f) {
-                    float factor = (5.5f - dist) / 5.5f;
+                if (dist < 6.0f) {
+                    float factor = (6.0f - dist) / 6.0f;
                     AirCell& cell = getCellRef(x, y, z);
 
                     if (z <= 3) {
-                        // Low layers: warm moist air to trigger buoyancy
-                        cell.temperature = 38.0f;
-                        cell.vapor       = 1.0f;
+                        // 低层：注入强烈暖湿气流，触发强对流
+                        cell.temperature = fmaxf(cell.temperature, 40.0f * factor + 28.0f * (1.0f - factor));
+                        cell.vapor       = fminf(1.0f, cell.vapor + 0.8f * factor);
+                    } else if (z <= 6) {
+                        // 中层：注入暖湿气流
+                        cell.temperature = fmaxf(cell.temperature, 30.0f * factor + 20.0f * (1.0f - factor));
+                        cell.vapor       = fminf(1.0f, cell.vapor + 0.6f * factor);
                     } else {
-                        // Mid/upper: cold moist air → low Vsat → instant condensation
-                        cell.temperature  -= 12.0f * factor;
-                        cell.vapor         = fminf(1.0f, cell.vapor + 0.7f * factor);
-                        cell.cloudDensity  = fminf(1.0f, cell.cloudDensity + 0.55f * factor);
+                        // 高层：注入水分并降温，促进凝结
+                        cell.vapor = fminf(1.0f, cell.vapor + 0.5f * factor);
+                        if (cell.temperature > 5.0f) {
+                            cell.temperature -= 12.0f * factor;
+                        }
+                        // 高层添加少量初始云密度，让效果更快显现
+                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.25f * factor);
                     }
 
-                    // Updraft (strongest at center)
-                    cell.velocityZ += 5.5f * factor * zRatio;
+                    // 增强上升气流（加速水汽输送到高空）
+                    cell.velocityZ += 9.0f * factor * zRatio;
 
-                    // Counter-clockwise rotation
+                    // 逆时针旋转
                     if (dist > 0.1f) {
                         float rx = -dy / dist;
                         float ry =  dx / dist;
                         float windNoiseX = sinf((float)x * 0.7f + (float)z * 1.5f) * 1.4f;
                         float windNoiseY = cosf((float)y * 0.7f - (float)z * 1.5f) * 1.4f;
-                        cell.velocityX += (rx * 3.8f + windNoiseX) * factor * zRatio;
-                        cell.velocityY += (ry * 3.8f + windNoiseY) * factor * zRatio;
+                        cell.velocityX += (rx * 4.5f + windNoiseX) * factor * zRatio;
+                        cell.velocityY += (ry * 4.5f + windNoiseY) * factor * zRatio;
                     }
                 }
             }
@@ -513,6 +596,79 @@ void AtmosphereSimulation::computeLightField() {
                     float finalLight = baseLight * (scatter + ambient + rim);
                     cell.lightIntensity = finalLight < 0.08f ? 0.08f : finalLight;
                 }
+            }
+        }
+    }
+}
+
+// ─── computeChargeSeparation ────────────────────────────────────────────────
+void AtmosphereSimulation::computeChargeSeparation(float dt) {
+    // 电荷分离物理：基于真实的雷暴云电荷分离机制
+    // 冰晶上升带走正电，霰粒下降带走负电
+    // 高层积累正电荷，低层积累负电荷
+    
+    for (int z = 0; z < Z_SIZE; z++) {
+        for (int y = 0; y < Y_SIZE; y++) {
+            for (int x = 0; x < X_SIZE; x++) {
+                AirCell& cell = getCellRef(x, y, z);
+                
+                if (cell.cloudDensity < 0.1f) {
+                    cell.posCharge *= (1.0f - 0.05f * dt);
+                    cell.negCharge *= (1.0f - 0.05f * dt);
+                    continue;
+                }
+
+                float zRatio = (float)z / (Z_SIZE - 1);
+                
+                // 冰晶含量：高层低温区域更多
+                float iceContent = (cell.temperature < -5.0f) ? 1.0f : 
+                                  (cell.temperature < 5.0f) ? (5.0f - cell.temperature) / 10.0f : 0.0f;
+                iceContent *= zRatio * cell.cloudDensity;
+                
+                // 霰粒含量：中层区域更多
+                float graupelContent = (zRatio > 0.3f && zRatio < 0.7f) ? 
+                                       (0.5f - fabsf(zRatio - 0.5f) * 2.0f) : 0.0f;
+                graupelContent *= cell.cloudDensity;
+
+                // 垂直速度导致电荷分离
+                // 上升气流：冰晶上升，带走正电
+                // 下降气流：霰粒下降，带走负电
+                if (cell.velocityZ > 0.5f) {
+                    float posGain = cell.velocityZ * iceContent * 0.3f * dt;
+                    float negLoss = cell.velocityZ * iceContent * 0.1f * dt;
+                    cell.posCharge += posGain;
+                    cell.negCharge -= negLoss;
+                }
+                if (cell.velocityZ < -0.5f) {
+                    float negGain = fabsf(cell.velocityZ) * graupelContent * 0.3f * dt;
+                    float posLoss = fabsf(cell.velocityZ) * graupelContent * 0.1f * dt;
+                    cell.negCharge += negGain;
+                    cell.posCharge -= posLoss;
+                }
+
+                // 高层倾向于积累正电荷（冰晶主导），低层倾向于积累负电荷
+                float heightEffect = zRatio * 0.05f * dt;
+                cell.posCharge += heightEffect * cell.cloudDensity;
+                cell.negCharge += (1.0f - zRatio) * 0.05f * dt * cell.cloudDensity;
+
+                // 电荷扩散（相邻格子之间的电荷传递）
+                float sumPos = 0, sumNeg = 0;
+                int cnt = 0;
+                if (x > 0) { sumPos += getCell(x-1,y,z).posCharge; sumNeg += getCell(x-1,y,z).negCharge; cnt++; }
+                if (x < X_SIZE-1) { sumPos += getCell(x+1,y,z).posCharge; sumNeg += getCell(x+1,y,z).negCharge; cnt++; }
+                if (y > 0) { sumPos += getCell(x,y-1,z).posCharge; sumNeg += getCell(x,y-1,z).negCharge; cnt++; }
+                if (y < Y_SIZE-1) { sumPos += getCell(x,y+1,z).posCharge; sumNeg += getCell(x,y+1,z).negCharge; cnt++; }
+                if (z > 0) { sumPos += getCell(x,y,z-1).posCharge; sumNeg += getCell(x,y,z-1).negCharge; cnt++; }
+                if (z < Z_SIZE-1) { sumPos += getCell(x,y,z+1).posCharge; sumNeg += getCell(x,y,z+1).negCharge; cnt++; }
+                
+                if (cnt > 0) {
+                    cell.posCharge += 0.02f * dt * (sumPos/cnt - cell.posCharge);
+                    cell.negCharge += 0.02f * dt * (sumNeg/cnt - cell.negCharge);
+                }
+
+                // 限制电荷范围
+                cell.posCharge = fmaxf(0.0f, fminf(1.0f, cell.posCharge));
+                cell.negCharge = fmaxf(0.0f, fminf(1.0f, cell.negCharge));
             }
         }
     }

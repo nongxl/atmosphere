@@ -251,9 +251,7 @@ void Renderer::drawSkyBackground(float extTemp) {
 void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, float densityThreshold) {
     int drawBudget = 55;
 
-    // 1. 动态视口自适应循环方向选择（Loop Order）
-    // 依据相机的 azimuth (偏航角) 的余弦与正弦正负号，决定循环是由大到小还是由小到大遍历。
-    // 强制先绘制离相机最近的最前排云（Front-to-Back），让 55 帧粒子预算完全分配给当前偏转视角下最靠近观众的体积云层。
+    // 动态视口自适应循环方向选择（Front-to-Back）
     int xStart = 0, xEnd = AtmosphereSimulation::X_SIZE, xStep = 1;
     int yStart = 0, yEnd = AtmosphereSimulation::Y_SIZE, yStep = 1;
 
@@ -277,18 +275,22 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 float d = sampleDensity(sim, x, y, z);
                 if (d <= densityThreshold) continue;
 
-                // 增加少量随机抖动打破网格规律感
-                float jitterX = ((float)random(200) / 100.0f - 1.0f) * 0.25f;
-                float jitterY = ((float)random(200) / 100.0f - 1.0f) * 0.25f;
+                // 增加随机抖动打破网格规律感，抖动幅度随密度增大而减小（密集区域保持相对紧凑）
+                float jitterScale = 0.6f * (1.0f - d * 0.5f);
+                float jitterX = ((float)random(200) / 100.0f - 1.0f) * jitterScale;
+                float jitterY = ((float)random(200) / 100.0f - 1.0f) * jitterScale;
+                float jitterZ = ((float)random(200) / 100.0f - 1.0f) * 0.3f;
                 int sx, sy;
-                cam.project((float)x + 0.5f + jitterX, (float)y + 0.5f + jitterY, (float)z + 0.5f, sx, sy);
+                cam.project((float)x + 0.5f + jitterX, (float)y + 0.5f + jitterY, (float)z + 0.5f + jitterZ, sx, sy);
 
                 // 屏幕投影剔除
                 if (sx < -15 || sx > SCREEN_W + 15 || sy < -15 || sy > SKY_AREA_H + 15) continue;
 
                 const AirCell& cell = sim.getCell(x, y, z);
-                // 云粒子投影半径
-                float r = cam.scale * (0.35f + d * 0.85f);
+                // 云粒子投影半径，增加随机变化打破均匀感
+                float baseRadius = cam.scale * (0.35f + d * 0.85f);
+                float radiusVariation = 0.3f * ((float)random(100) / 100.0f - 0.5f);
+                float r = baseRadius * (1.0f + radiusVariation);
                 if (r < 1.5f) r = 1.5f;
 
                 // 光照强度计算与色彩插值
@@ -357,28 +359,36 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
     }
 }
 float Renderer::sampleDensity(const AtmosphereSimulation& sim, int x, int y, int z) const {
-    // 读取物理引擎真实模拟的云密度
     float physicalDensity = sim.getCell(x, y, z).cloudDensity;
     
-    // 恢复高频边缘流动噪声：用快速二次正弦近似消灭三角函数昂贵开销
-    // 边缘流动速度随台风成长而加速（成熟期流动速度最快可达原本的 3.5 倍，展现暴风吹拂）
     float flowSpeedMultiplier = 1.0f + 2.5f * sim.getTyphoonGrowth();
     float timeSec = (millis() / 1000.0f) * flowSpeedMultiplier;
     float nx = (float)x / 16.0f;
     float ny = (float)y / 16.0f;
     float nz = (float)z / 12.0f;
 
-    // 两层分形噪声层 (freq1=4, freq2=12)
+    // 多层分形噪声，使用不同频率和相位，打破周期性规律
     float n1 = fastSin(nx * 25.13274f + timeSec) *
-               fastCos(ny * 25.13274f + timeSec * 0.7f) *
-               fastSin(nz * 25.13274f + timeSec * 0.4f);
+               fastCos(ny * 18.84956f + timeSec * 0.7f) *
+               fastSin(nz * 31.41593f + timeSec * 0.4f);
 
     float n2 = fastSin(nx * 75.39822f + timeSec * 1.3f) *
-               fastCos(ny * 75.39822f + timeSec * 0.9f) *
-               fastSin(nz * 75.39822f + timeSec * 0.6f);
+               fastCos(ny * 62.83185f + timeSec * 0.9f) *
+               fastSin(nz * 87.96459f + timeSec * 0.6f);
 
-    float noise = 0.7f * n1 + 0.3f * n2;
-    float edgeNoise = ((noise + 1.0f) * 0.5f) * 0.15f; // 15% 边缘软化权重
+    float n3 = fastSin(nx * 47.12389f + timeSec * 0.5f) *
+               fastCos(ny * 56.54867f + timeSec * 1.2f) *
+               fastSin(nz * 43.98230f + timeSec * 0.8f);
+
+    float n4 = fastSin(nx * 94.24778f + timeSec * 1.5f) *
+               fastCos(ny * 109.95574f + timeSec * 0.3f) *
+               fastSin(nz * 125.66371f + timeSec * 1.1f);
+
+    float noise = 0.4f * n1 + 0.25f * n2 + 0.2f * n3 + 0.15f * n4;
+    
+    float spatialNoise = sim.getNoiseVal(x, y, z) * 0.08f;
+    
+    float edgeNoise = ((noise + 1.0f) * 0.5f) * 0.12f + spatialNoise;
     return physicalDensity + edgeNoise;
 }
 

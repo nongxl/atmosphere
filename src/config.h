@@ -43,6 +43,6 @@ inline float clampF(float v, float lo, float hi) {
 }
 
 //── 闪电系统 ──────────────────────────────────────────────────────
-// 电荷超过此阈值时触发闪电，之后保留 30% 电荷
-static constexpr float LIGHTNING_CHARGE_THRESHOLD = 80.0f;
-static constexpr float LIGHTNING_CHARGE_DECAY     = 0.30f; // 放电后保留比例
+// 电荷超过此阈值时触发闪电，之后保留 40% 电荷
+static constexpr float LIGHTNING_CHARGE_THRESHOLD = 35.0f;  // 降低阈值，更容易触发闪电
+static constexpr float LIGHTNING_CHARGE_DECAY     = 0.40f; // 放电后保留比例提高
