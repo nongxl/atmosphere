@@ -19,20 +19,20 @@ public:
     mutable float _cachedCosE = 1.0f;
     mutable float _cachedSinE = 0.0f;
 
-    Camera(float cx = 67.5f, float cy = 105.0f, float s = 4.6f, float hs = 7.0f)
+    Camera(float cx = 67.5f, float cy = 100.0f, float s = 4.6f, float hs = 7.0f)
         : centerX(cx), centerY(cy), scale(s), heightScale(hs),
           azimuth(0.0f), elevation(0.0f) {}
 
     // 将 3D 物理空间网格坐标 (x, y, z) 严格转换为 3D 轨道球透视屏幕坐标 (screenX, screenY)
     // 标准右手 3D 相机坐标变换矩阵：
-    // - elevation = 0: 正平视 (地面在下方 165px，云层在上方 35~110px，雨滴从上往下落向地面)
+    // - elevation = 0: 正平视 (云顶充盈于上方 50px，云底在 107px，地面在下方 156px)
     // - elevation > 0: 前倾俯视看云顶 (近端在下，远端在上，云顶覆盖云底)
     // - elevation < 0: 后仰仰视看云底
     // - azimuth 变化: 左右环绕观察云的左侧与右侧
     void project(float x, float y, float z, int& screenX, int& screenY) const {
         const float gridCenterX = 7.5f;
         const float gridCenterY = 7.5f;
-        const float gridCenterZ = 5.5f;
+        const float gridCenterZ = 4.0f;
         
         float dx = x - gridCenterX;
         float dy = y - gridCenterY;

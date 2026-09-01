@@ -55,31 +55,29 @@ void Renderer::init(M5Canvas* canvas) {
 }
 
 void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
-    // 1. 生成雨滴（严格限制在低空乌云底 z: 1 ~ 5 生成并向地面降落）
-    for (int z = 1; z <= 5; z++) {
-        for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
-            for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
-                const AirCell& cell = sim.getCell(x, y, z);
-                
-                // 只有当当前乌云层致密，且下方空间开阔时才生成雨滴
-                bool isCloudBottom = (cell.cloudDensity > 0.45f);
-                if (z > 1) {
-                    const AirCell& belowCell = sim.getCell(x, y, z - 1);
-                    isCloudBottom = isCloudBottom && (belowCell.cloudDensity < 0.40f);
+    // 1. 智能雨滴生成：沿垂直空气柱自底向上寻找真实存在的致密云底 (Lowest Cloud Base)
+    for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
+        for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
+            int cloudBaseZ = -1;
+            for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
+                if (sim.getCell(x, y, z).cloudDensity > 0.40f) {
+                    cloudBaseZ = z;
+                    break;
                 }
-                
-                if (isCloudBottom && (random(1000) < 22)) {
-                    for (int i = 0; i < MAX_RAIN_DROPS; i++) {
-                        if (!_drops[i].active) {
-                            _drops[i].active = true;
-                            _drops[i].x = (float)x + (random(100) / 100.0f);
-                            _drops[i].y = (float)y + (random(100) / 100.0f);
-                            _drops[i].z = (float)z - 0.2f; // 从乌云底略下方生成
-                            _drops[i].vx = cell.velocityX * 0.5f;
-                            _drops[i].vy = cell.velocityY * 0.5f;
-                            _drops[i].vz = -5.5f - (random(100) / 25.0f); // 强劲向下垂直雨速
-                            break;
-                        }
+            }
+
+            // 只有当前空气柱上方确实存在云层，才从云底正下方生成降雨
+            if (cloudBaseZ >= 1 && (random(1000) < 25)) {
+                for (int i = 0; i < MAX_RAIN_DROPS; i++) {
+                    if (!_drops[i].active) {
+                        _drops[i].active = true;
+                        _drops[i].x = (float)x + (random(100) / 100.0f);
+                        _drops[i].y = (float)y + (random(100) / 100.0f);
+                        _drops[i].z = (float)cloudBaseZ - 0.25f; // 严格从最低云底下方生成
+                        _drops[i].vx = sim.getCell(x, y, cloudBaseZ).velocityX * 0.4f;
+                        _drops[i].vy = sim.getCell(x, y, cloudBaseZ).velocityY * 0.4f;
+                        _drops[i].vz = -5.5f - (random(100) / 25.0f); // 强劲向下垂直初速度
+                        break;
                     }
                 }
             }
@@ -90,13 +88,13 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
     for (int i = 0; i < MAX_RAIN_DROPS; i++) {
         if (!_drops[i].active) continue;
 
-        // 亚像素更新
+        // 亚像素物理下落
         _drops[i].x += _drops[i].vx * dt;
         _drops[i].y += _drops[i].vy * dt;
         _drops[i].z += _drops[i].vz * dt;
-        _drops[i].vz -= 12.0f * dt; // 真实重力加速度
+        _drops[i].vz -= 14.0f * dt; // 真实重力加速度倾泻
 
-        // 获取所在网格的风速并稍加影响
+        // 弱风场随动
         int gx = (int)_drops[i].x;
         int gy = (int)_drops[i].y;
         int gz = (int)_drops[i].z;
@@ -104,11 +102,11 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
             gy >= 0 && gy < AtmosphereSimulation::Y_SIZE &&
             gz >= 0 && gz < AtmosphereSimulation::Z_SIZE) {
             const AirCell& c = sim.getCell(gx, gy, gz);
-            _drops[i].vx = _drops[i].vx * 0.92f + c.velocityX * 0.08f;
-            _drops[i].vy = _drops[i].vy * 0.92f + c.velocityY * 0.08f;
+            _drops[i].vx = _drops[i].vx * 0.94f + c.velocityX * 0.06f;
+            _drops[i].vy = _drops[i].vy * 0.94f + c.velocityY * 0.06f;
         }
 
-        // 超界或掉落到地面 (z <= 0) 时回收
+        // 超界或落到地面 (z <= 0) 时回收
         if (_drops[i].z <= 0.0f || 
             _drops[i].x < 0.0f || _drops[i].x >= AtmosphereSimulation::X_SIZE ||
             _drops[i].y < 0.0f || _drops[i].y >= AtmosphereSimulation::Y_SIZE) {
@@ -381,7 +379,7 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 // 几何视线深度计算（标准 3D 摄像机视线深度，depth 越大表示离眼睛越远）：
                 float dx = wx - 7.5f;
                 float dy = wy - 7.5f;
-                float dz = (wz - 5.5f) * (cam.heightScale / cam.scale);
+                float dz = (wz - 4.0f) * (cam.heightScale / cam.scale);
                 float y1 = dx * sinA + dy * cosA;
                 // depth = y1 * cosE - dz * sinE (严格连续的视线物理深度)
                 float depth = y1 * cosE - dz * sinE;
