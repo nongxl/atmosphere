@@ -235,10 +235,11 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
                 }
 
                 // 重力感应差异浮力：沿 IMU 重力反方向上浮
-                // 修复：减小云密度的重力拖拽，并给予基础微弱浮力，确保云层悬浮在高空而不坠地
+                // 修复：减小云密度的重力拖拽，并增加底部地表热气流支撑，使乌云自然悬浮在半空，流出暴雨下落空间
                 float thermalBuoy = (cur.temperature - extTemp) * 0.015f * dt;
-                float cloudWeight = cur.cloudDensity * 0.001f * dt;
-                float netBuoy = thermalBuoy - cloudWeight + (cur.cloudDensity * 0.008f * dt);
+                float cloudWeight = cur.cloudDensity * 0.006f * dt;
+                float groundCushion = (z < 4) ? (4.0f - (float)z) * 0.003f * dt : 0.0f;
+                float netBuoy = thermalBuoy - cloudWeight + groundCushion;
                 // 浮力沿重力反方向施加（_gravX/Y/Z 指向重力方向，浮力取反）
                 next.velocityX -= netBuoy * _gravX;
                 next.velocityY -= netBuoy * _gravY;

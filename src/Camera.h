@@ -25,7 +25,7 @@ public:
     mutable float _cachedCosE = 1.0f;
     mutable float _cachedSinE = 0.0f;
 
-    Camera(float cx = 67.5f, float cy = 85.0f, float s = 4.6f, float hs = 7.5f)
+    Camera(float cx = 67.5f, float cy = 100.0f, float s = 4.6f, float hs = 15.4f)
         : centerX(cx), centerY(cy), scale(s), heightScale(hs),
           azimuth(0.0f), elevation(0.0f) {}
 
