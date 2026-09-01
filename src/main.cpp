@@ -118,9 +118,17 @@ void loop() {
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
             // M5StickS3 竖屏（Rotation 0，135x240）物理芯片引脚：
-            // ax: 沿设备长边 (竖直手持平视时 ax ≈ -1.0G)
-            // ay: 沿设备短边 (左右侧倾分量)
-            // az: 垂直屏幕法向 (前后俯仰分量)
+            // ax: 沿设备长边 (竖直手持平视时 ax ≈ -1.0G) -> gravZ
+            // ay: 沿设备短边 (左右侧倾分量) -> gravX
+            // az: 垂直屏幕法向 (前后俯仰分量) -> gravY
+            
+            float gravLen = sqrtf(ax * ax + ay * ay + az * az);
+            if (gravLen > 0.1f) {
+                camera->gravX = ay / gravLen;
+                camera->gravY = az / gravLen;
+                camera->gravZ = ax / gravLen;
+                sim->setGravity(camera->gravX, camera->gravY, camera->gravZ);
+            }
 
             // 1. 左右转动 (Roll / Azimuth) 严格由短轴 ay 驱动
             float rawRoll = ay;
@@ -147,9 +155,6 @@ void loop() {
             camera->azimuth = clampF(-effRoll * 1.6f, -1.4f, 1.4f);
             camera->elevation = clampF(effPitch * 1.1f, -1.2f, 1.2f);
 
-            // 实时同步物理世界重力矢量驱动云体浮力与倾斜降雨 (ax:长轴, ay:短轴, az:法向)
-            sim->setGravityVector(ay, 0.0f, ax);
-
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
                 lastPrintMs = millis();
@@ -173,7 +178,7 @@ void loop() {
 
     // 4. 更新雨滴粒子系统
     uint32_t particleStart = micros();
-    renderer->updateParticles(*sim, dt);
+    renderer->updateParticles(*sim, *camera, dt);
     uint32_t particleTime = micros() - particleStart;
 
     // 5. 渲染画面

@@ -13,10 +13,6 @@ AtmosphereSimulation::AtmosphereSimulation()
     _nextCells  = new AirCell[X_SIZE * Y_SIZE * Z_SIZE];
     _noiseTable = new float[X_SIZE * Y_SIZE * Z_SIZE];
 
-    _gravityX = 0.0f;
-    _gravityY = 0.0f;
-    _gravityZ = -1.0f;
-
     // Precalculate noise table for Vsat modulation (removes ~9000 sinf/cosf per frame)
     for (int z = 0; z < Z_SIZE; z++) {
         for (int y = 0; y < Y_SIZE; y++) {
@@ -30,19 +26,6 @@ AtmosphereSimulation::AtmosphereSimulation()
     }
 }
 
-void AtmosphereSimulation::setGravityVector(float gx, float gy, float gz) {
-    float len = sqrtf(gx * gx + gy * gy + gz * gz);
-    if (len > 0.001f) {
-        _gravityX = gx / len;
-        _gravityY = gy / len;
-        _gravityZ = gz / len;
-    } else {
-        _gravityX = 0.0f;
-        _gravityY = 0.0f;
-        _gravityZ = -1.0f;
-    }
-}
-
 AtmosphereSimulation::~AtmosphereSimulation() {
     delete[] _cells;
     delete[] _nextCells;
@@ -51,9 +34,6 @@ AtmosphereSimulation::~AtmosphereSimulation() {
 
 // ─── init ──────────────────────────────────────────────────────────────────
 void AtmosphereSimulation::init(float initTemp, float initHum, float initPres) {
-    _gravityX = 0.0f;
-    _gravityY = 0.0f;
-    _gravityZ = -1.0f;
     _typhoonGrowth = 0.0f;
     _electricCharge = 0.0f;
     _lightningPending = false;
@@ -254,29 +234,16 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
                     }
                 }
 
-                // ── 差异化浮力物理模型（云朝重力反方向上浮，不同云具有不同浮力）──
-                // 反重力单位矢量 (Upward Buoyancy Direction)
-                float upX = -_gravityX;
-                float upY = -_gravityY;
-                float upZ = -_gravityZ;
-
-                // 基础热力浮力
-                float thermalBuoy = (cur.temperature - extTemp) * 0.025f;
-
-                // 云体差异化浮力：
-                // 高空轻盈冰晶白云 (z >= 8)：极高浮力，轻盈上浮至天穹天顶
-                // 底层沉重雷暴乌云 (cloudDensity 高且处于阴影区)：云水质量负载拖曳，产生下沉沉降倾向
-                float cloudBuoy = 0.0f;
-                if (cur.cloudDensity > 0.1f) {
-                    float zNorm = (float)z / (Z_SIZE - 1);
-                    float lightFactor = (zNorm >= 0.65f) ? (1.5f + zNorm * 1.5f) : (0.35f - (1.0f - zNorm) * cur.cloudDensity * 0.7f);
-                    cloudBuoy = cur.cloudDensity * lightFactor * 0.35f;
-                }
-
-                float totalBuoy = (thermalBuoy + cloudBuoy) * dt;
-                next.velocityX += upX * totalBuoy;
-                next.velocityY += upY * totalBuoy;
-                next.velocityZ += upZ * totalBuoy;
+                // 重力感应差异浮力：沿 IMU 重力反方向上浮
+                // thermalBuoy: 温差驱动的热对流浮力（暖空气上升）
+                // cloudWeight: 云密度带来的含水量重力拖拽（致密乌云更沉）
+                float thermalBuoy = (cur.temperature - extTemp) * 0.015f * dt;
+                float cloudWeight = cur.cloudDensity * 0.012f * dt;
+                float netBuoy = thermalBuoy - cloudWeight;
+                // 浮力沿重力反方向施加（_gravX/Y/Z 指向重力方向，浮力取反）
+                next.velocityX -= netBuoy * _gravX;
+                next.velocityY -= netBuoy * _gravY;
+                next.velocityZ -= netBuoy * _gravZ;
 
                 next.velocityX *= (1.0f - 0.12f * dt);
                 next.velocityY *= (1.0f - 0.12f * dt);

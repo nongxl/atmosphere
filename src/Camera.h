@@ -12,6 +12,12 @@ public:
     float azimuth;    // 水平环视旋转角 (弧度): 0 = 正面, 负值 = 观察左侧, 正值 = 观察右侧
     float elevation;  // 垂直俯仰角 (弧度): 0 = 正平视, 正值 = 前倾俯视看云顶, 负值 = 后倾仰视看云底
 
+    // IMU 驱动的归一化重力矢量（网格空间坐标系）
+    // 竖直手持时 gravZ ≈ -1.0（重力指向 -Z 方向即向下）
+    float gravX = 0.0f;
+    float gravY = 0.0f;
+    float gravZ = -1.0f;
+
     mutable float _lastAzimuth = -999.0f;
     mutable float _lastElevation = -999.0f;
     mutable float _cachedCosA = 1.0f;

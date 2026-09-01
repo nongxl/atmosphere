@@ -42,6 +42,12 @@ public:
     // 台风生命周期接口
     float getTyphoonGrowth() const { return _typhoonGrowth; }
 
+    // IMU 重力矢量接口（归一化重力方向，竖直手持时 gz ≈ -1.0）
+    void setGravity(float gx, float gy, float gz) { _gravX = gx; _gravY = gy; _gravZ = gz; }
+    float getGravX() const { return _gravX; }
+    float getGravY() const { return _gravY; }
+    float getGravZ() const { return _gravZ; }
+
     inline const AirCell& getCell(int x, int y, int z) const {
         return _cells[z * X_SIZE * Y_SIZE + y * X_SIZE + x];
     }
@@ -50,21 +56,10 @@ public:
         return _noiseTable[z * X_SIZE * Y_SIZE + y * X_SIZE + x];
     }
 
-    // 动态重力矢量 (gx, gy, gz)，默认竖直向下 (0, 0, -1.0)
-    void setGravityVector(float gx, float gy, float gz);
-    inline void getGravityVector(float& gx, float& gy, float& gz) const {
-        gx = _gravityX; gy = _gravityY; gz = _gravityZ;
-    }
-
 private:
     AirCell* _cells;
     AirCell* _nextCells;
     float*   _noiseTable;
-
-    // 动态重力与浮力场参数
-    float _gravityX;
-    float _gravityY;
-    float _gravityZ;
 
     // 闪电系统状态
     float _electricCharge;   // 当前电荷（超过阈值则触发闪电）
@@ -87,6 +82,11 @@ private:
 
     // 电荷分离相关
     float _maxChargeSeparation; // 最大电荷分离度
+
+    // IMU 驱动的归一化重力矢量（网格空间坐标系）
+    float _gravX = 0.0f;
+    float _gravY = 0.0f;
+    float _gravZ = -1.0f;
 
     void computeLightField();
     void computeTemperatureProfile(float initTemp);

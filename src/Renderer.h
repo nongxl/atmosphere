@@ -28,7 +28,7 @@ public:
     void init(M5Canvas* canvas);
 
     // 更新粒子系统（雨滴和风粒子）
-    void updateParticles(const AtmosphereSimulation& sim, float dt);
+    void updateParticles(const AtmosphereSimulation& sim, const Camera& cam, float dt);
 
     // 绘制整个世界（背景、体积云、降雨、闪电、状态栈）
     // 注意: sim 为非 const 引用，以便内部消耗闪电事件标志

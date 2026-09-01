@@ -53,13 +53,14 @@ Renderer::Renderer()
 void Renderer::init(M5Canvas* canvas) {
     _canvas = canvas;
 }
+void Renderer::updateParticles(const AtmosphereSimulation& sim, const Camera& cam, float dt) {
+    // 获取 IMU 驱动的归一化重力矢量
+    float gx = cam.gravX;
+    float gy = cam.gravY;
+    float gz = cam.gravZ;
 
-void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
-    float gravX, gravY, gravZ;
-    sim.getGravityVector(gravX, gravY, gravZ);
-
-    // 1. 真实物理微物理降雨自然生成 (Kessler Gravity-Aligned Cloud Base)
-    // 沿每根垂直空气柱，自底向上严格寻找“当前最下方的致密深色乌云界面”
+    // 1. 真实物理微物理降雨自然生成 (Kessler Lowest Dark Cloud Base Interface)
+    // 沿每根垂直空气柱，自底向上严格寻找"当前最下方的致密深色乌云界面"
     for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
         for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
             int lowestDarkBaseZ = -1;
@@ -87,16 +88,16 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
                         float warpY = noiseValY * 0.75f;
                         float warpZ = noiseValZ * 0.70f;
                         
-                        // 沿着物理重力矢量方向在乌云底面萌生
-                        _drops[i].x = (float)x + 0.5f + warpX + gravX * 0.35f + (random(100) - 50) * 0.004f;
-                        _drops[i].y = (float)y + 0.5f + warpY + gravY * 0.35f + (random(100) - 50) * 0.004f;
-                        _drops[i].z = (float)lowestDarkBaseZ + 0.5f + warpZ + gravZ * 0.45f;
+                        _drops[i].x = (float)x + 0.5f + warpX + (random(100) - 50) * 0.004f;
+                        _drops[i].y = (float)y + 0.5f + warpY + (random(100) - 50) * 0.004f;
+                        _drops[i].z = (float)lowestDarkBaseZ + 0.5f + warpZ - 0.45f; // 严格在最低乌云底正下方
                         
                         const AirCell& baseCell = sim.getCell(x, y, lowestDarkBaseZ);
-                        float initSpeed = 6.0f + (random(100) / 25.0f);
-                        _drops[i].vx = baseCell.velocityX * 0.35f + gravX * initSpeed;
-                        _drops[i].vy = baseCell.velocityY * 0.35f + gravY * initSpeed;
-                        _drops[i].vz = gravZ * initSpeed; // 顺着重力矢量初速度
+                        // 雨滴初速度沿重力方向（IMU 驱动）+ 微弱风场随动
+                        float rainSpeed = 5.5f + (random(100) / 25.0f);
+                        _drops[i].vx = baseCell.velocityX * 0.35f + gx * rainSpeed;
+                        _drops[i].vy = baseCell.velocityY * 0.35f + gy * rainSpeed;
+                        _drops[i].vz = baseCell.velocityZ * 0.10f + gz * rainSpeed;
                         break;
                     }
                 }
@@ -104,36 +105,36 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
         }
     }
 
-    // 2. 更新已有的雨滴（随物理重力矢量动态加速）
+    // 2. 更新已有的雨滴
     for (int i = 0; i < MAX_RAIN_DROPS; i++) {
         if (!_drops[i].active) continue;
 
-        // 亚像素物理位移
+        // 亚像素物理下落
         _drops[i].x += _drops[i].vx * dt;
         _drops[i].y += _drops[i].vy * dt;
         _drops[i].z += _drops[i].vz * dt;
-
-        // 真实 3D 物理重力矢量动态倾泻加速
-        _drops[i].vx += gravX * 15.0f * dt;
-        _drops[i].vy += gravY * 15.0f * dt;
-        _drops[i].vz += gravZ * 15.0f * dt;
+        
+        // 真实重力加速度沿 IMU 重力矢量方向倾泻
+        _drops[i].vx += 14.0f * gx * dt;
+        _drops[i].vy += 14.0f * gy * dt;
+        _drops[i].vz += 14.0f * gz * dt;
 
         // 弱风场随动
-        int gx = (int)_drops[i].x;
-        int gy = (int)_drops[i].y;
-        int gz = (int)_drops[i].z;
-        if (gx >= 0 && gx < AtmosphereSimulation::X_SIZE &&
-            gy >= 0 && gy < AtmosphereSimulation::Y_SIZE &&
-            gz >= 0 && gz < AtmosphereSimulation::Z_SIZE) {
-            const AirCell& c = sim.getCell(gx, gy, gz);
-            _drops[i].vx = _drops[i].vx * 0.95f + c.velocityX * 0.05f;
-            _drops[i].vy = _drops[i].vy * 0.95f + c.velocityY * 0.05f;
+        int igx = (int)_drops[i].x;
+        int igy = (int)_drops[i].y;
+        int igz = (int)_drops[i].z;
+        if (igx >= 0 && igx < AtmosphereSimulation::X_SIZE &&
+            igy >= 0 && igy < AtmosphereSimulation::Y_SIZE &&
+            igz >= 0 && igz < AtmosphereSimulation::Z_SIZE) {
+            const AirCell& c = sim.getCell(igx, igy, igz);
+            _drops[i].vx = _drops[i].vx * 0.94f + c.velocityX * 0.06f;
+            _drops[i].vy = _drops[i].vy * 0.94f + c.velocityY * 0.06f;
         }
 
-        // 超界或落到地面回收
+        // 超界回收（任何轴出界或所有轴都在有效范围外时回收）
         if (_drops[i].z <= 0.0f || _drops[i].z >= AtmosphereSimulation::Z_SIZE ||
-            _drops[i].x < 0.0f || _drops[i].x >= AtmosphereSimulation::X_SIZE ||
-            _drops[i].y < 0.0f || _drops[i].y >= AtmosphereSimulation::Y_SIZE) {
+            _drops[i].x < -1.0f || _drops[i].x >= AtmosphereSimulation::X_SIZE + 1 ||
+            _drops[i].y < -1.0f || _drops[i].y >= AtmosphereSimulation::Y_SIZE + 1) {
             _drops[i].active = false;
         }
     }
