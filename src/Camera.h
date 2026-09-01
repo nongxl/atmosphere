@@ -8,51 +8,60 @@ public:
     float scale;
     float heightScale;
 
-    // IMU 驱动的 3D 视角旋转参数
-    float azimuth;    // 水平旋转角偏移 (弧度)，0 = 正中
-    float elevation;  // 俯仰角偏移 (弧度)，0 = 默认 32° 俯视
+    // 3D 轨道球相机视角参数 (绕云中心纯旋转观察)
+    float azimuth;    // 水平环视旋转角 (弧度): 0 = 正面, 负值 = 观察左侧, 正值 = 观察右侧
+    float elevation;  // 垂直俯仰角 (弧度): 0 = 正平视, 正值 = 前倾俯视看云顶, 负值 = 后倾仰视看云底
 
-    // 默认观察方位角
-    static constexpr float BASE_AZIMUTH = 0.785398f; // 45度 等轴基准方位角
+    mutable float _lastAzimuth = -999.0f;
+    mutable float _lastElevation = -999.0f;
+    mutable float _cachedCosA = 1.0f;
+    mutable float _cachedSinA = 0.0f;
+    mutable float _cachedCosE = 1.0f;
+    mutable float _cachedSinE = 0.0f;
 
-    Camera(float cx = 67.5f, float cy = 100.0f, float s = 4.3f, float hs = 5.0f)
+    Camera(float cx = 67.5f, float cy = 92.0f, float s = 4.8f, float hs = 5.2f)
         : centerX(cx), centerY(cy), scale(s), heightScale(hs),
-          azimuth(0.0f), elevation(0.60f) {}
+          azimuth(0.0f), elevation(0.0f) {}
 
-    // 将 3D 物理网格坐标 (x, y, z) 转换为 2D 屏幕坐标 (screenX, screenY)
-    // 采用标准 3D 环绕相机模型 (Orbit Camera)：绕网格物理中心纯 3D 空间旋转
+    // 将 3D 物理空间网格坐标 (x, y, z) 严格转换为 3D 轨道球透视屏幕坐标 (screenX, screenY)
+    // 纯旋转无平移模型：
+    // - elevation = 0: 正侧面平视 (用户平视设备，屏幕中也是平视云侧面)
+    // - elevation > 0: 俯视观察云顶 (向前倾斜设备)
+    // - elevation < 0: 仰视观察云底 (向后倾斜设备)
+    // - azimuth 变化: 左右环绕观察云的左侧与右侧
     void project(float x, float y, float z, int& screenX, int& screenY) const {
         const float gridCenterX = 7.5f;
         const float gridCenterY = 7.5f;
         const float gridCenterZ = 5.5f;
         
-        // 1. 相对中心相对坐标
         float dx = x - gridCenterX;
         float dy = y - gridCenterY;
-        float dz = (z - gridCenterZ) * 1.15f; // 纵向高度比例调节
+        float dz = (z - gridCenterZ) * (heightScale / scale); // 统一几何尺度
 
-        // 2. 第一步：绕垂直轴旋转方位角 (Base + Azimuth)
-        float totalAzimuth = BASE_AZIMUTH + azimuth;
-        float cosA = cosf(totalAzimuth);
-        float sinA = sinf(totalAzimuth);
-        float x1 = dx * cosA - dy * sinA;
-        float y1 = dx * sinA + dy * cosA;
+        // 1. 缓存三角函数
+        if (azimuth != _lastAzimuth) {
+            _lastAzimuth = azimuth;
+            _cachedCosA = cosf(azimuth);
+            _cachedSinA = sinf(azimuth);
+        }
+        if (elevation != _lastElevation) {
+            _lastElevation = elevation;
+            _cachedCosE = cosf(elevation);
+            _cachedSinE = sinf(elevation);
+        }
+
+        // 2. 绕世界垂直轴 Z 旋转 azimuth (左右转动视角)
+        float x1 = dx * _cachedCosA - dy * _cachedSinA;
+        float y1 = dx * _cachedSinA + dy * _cachedCosA;
         float z1 = dz;
 
-        // 3. 第二步：绕水平轴旋转俯仰角 (elevation: 0.05 纯平视 -> 1.25 高空俯视)
-        float elev = elevation;
-        if (elev < 0.05f) elev = 0.05f; // 允许水平平视 (3°)
-        if (elev > 1.25f) elev = 1.25f; // 防止垂直朝下 (72°)
-        float cosE = cosf(elev);
-        float sinE = sinf(elev);
+        // 3. 绕相机水平横轴 X 旋转 elevation (前后俯仰视角)
+        // Y_view 向上为正: 平视(E=0)时 Y_view = z1; 俯视(E>0)时看到近处 y1<0 偏下方，远处的 y1>0 偏上方
+        float xView = x1;
+        float yView = z1 * _cachedCosE - y1 * _cachedSinE;
 
-        // 正统 3D 观察投影：
-        // 平视时 (elev ≈ 0): sinE=0, cosE=1 -> projY = -dz (纯高度投影，与云水平平视！)
-        // 俯视时 (elev > 0): 远景 y1 向上展开，展现立体深度
-        float projY = -(y1 * sinE + dz * cosE);
-
-        // 4. 映射到屏幕中心
-        screenX = (int)roundf(centerX + x1 * 0.92f * scale);
-        screenY = (int)roundf(centerY + projY * scale);
+        // 4. 投影至 2D 屏幕 (屏幕 Y 向下为正，因此减去 yView * scale)
+        screenX = (int)roundf(centerX + xView * scale);
+        screenY = (int)roundf(centerY - yView * scale);
     }
 };
