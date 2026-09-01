@@ -55,52 +55,44 @@ void Renderer::init(M5Canvas* canvas) {
 }
 
 void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
-    // 1. 真实物理微物理降雨自然生成 (Kessler Autoconversion & Rain Shedding)
-    // 降水纯粹由云层物理性质自然涌现：
-    // ① 密度达到致密降水阈值 (cloudDensity > 0.42f)
-    // ② 处于深色乌云区域 (lightIntensity < 0.42f，被上方厚云自阴影遮蔽的乌云区，绝非向光白云顶)
-    // ③ 处于乌云下界面 (下方云密度显著变薄，雨滴自然脱离云底渗出)
-    for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
-        for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
-            for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
+    // 1. 真实物理微物理降雨自然生成 (Kessler Lowest Dark Cloud Base Interface)
+    // 沿每根垂直空气柱，自底向上严格寻找“当前最下方的致密深色乌云界面”
+    for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
+        for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
+            int lowestDarkBaseZ = -1;
+            for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
                 const AirCell& cell = sim.getCell(x, y, z);
-                
-                // 必须是足够致密的深色乌云区 (雨和雷电在乌云处自然发生)
-                if (cell.cloudDensity > 0.42f && cell.lightIntensity < 0.42f) {
-                    // 检测是否处于乌云的下边缘 (下方密度变薄或者下方空间开阔)
-                    const AirCell& belowCell = sim.getCell(x, y, z - 1);
-                    bool isSheddingBoundary = (belowCell.cloudDensity < cell.cloudDensity * 0.80f) || (belowCell.cloudDensity < 0.35f);
-                    
-                    if (isSheddingBoundary) {
-                        // 动态降雨几率与乌云厚度与密度正相关
-                        float rainChance = (cell.cloudDensity - 0.40f) * 60.0f; // 自然概率
-                        if (random(1000) < (int)rainChance) {
-                            for (int i = 0; i < MAX_RAIN_DROPS; i++) {
-                                if (!_drops[i].active) {
-                                    _drops[i].active = true;
-                                    
-                                    // 获取该处云体扭曲后的真实连续空间位置
-                                    float noiseValX = sim.getNoiseVal(x, y, z) * 2.0f - 1.0f;
-                                    float noiseValY = sim.getNoiseVal((x + 6) % AtmosphereSimulation::X_SIZE, (y + 9) % AtmosphereSimulation::Y_SIZE, z) * 2.0f - 1.0f;
-                                    float noiseValZ = sim.getNoiseVal((x + 3) % AtmosphereSimulation::X_SIZE, y, (z + 4) % AtmosphereSimulation::Z_SIZE) * 2.0f - 1.0f;
-                                    
-                                    float warpX = noiseValX * (0.75f + (1.0f - cell.cloudDensity) * 0.35f);
-                                    float warpY = noiseValY * (0.75f + (1.0f - cell.cloudDensity) * 0.35f);
-                                    float warpZ = noiseValZ * 0.70f;
-                                    
-                                    // 严格从该乌云体素的下表面边界孵化
-                                    _drops[i].x = (float)x + 0.5f + warpX + (random(100) - 50) * 0.004f;
-                                    _drops[i].y = (float)y + 0.5f + warpY + (random(100) - 50) * 0.004f;
-                                    _drops[i].z = (float)z + 0.5f + warpZ - 0.45f; // 下表面界面
-                                    
-                                    // 继承局部风场水平速度，并赋予强劲垂直重力降水速度
-                                    _drops[i].vx = cell.velocityX * 0.4f;
-                                    _drops[i].vy = cell.velocityY * 0.4f;
-                                    _drops[i].vz = -5.5f - (random(100) / 25.0f);
-                                    break;
-                                }
-                            }
-                        }
+                // 寻找最底层的致密深色乌云区 (cloudDensity > 0.40 && lightIntensity < 0.45)
+                if (cell.cloudDensity > 0.40f && cell.lightIntensity < 0.45f) {
+                    lowestDarkBaseZ = z;
+                    break; // 找到当前空气柱的最下端乌云底，立刻跳出，绝不向上寻找！
+                }
+            }
+
+            // 只有当前空气柱确实存在乌云底部，且下方空气层开阔，才从最下端乌云底面渗出降水
+            if (lowestDarkBaseZ >= 1 && (random(1000) < 28)) {
+                for (int i = 0; i < MAX_RAIN_DROPS; i++) {
+                    if (!_drops[i].active) {
+                        _drops[i].active = true;
+                        
+                        // 考虑多尺度流体空间扭曲 (Domain Warping)，雨滴严格贴合屏幕所见乌云底面
+                        float noiseValX = sim.getNoiseVal(x, y, lowestDarkBaseZ) * 2.0f - 1.0f;
+                        float noiseValY = sim.getNoiseVal((x + 6) % AtmosphereSimulation::X_SIZE, (y + 9) % AtmosphereSimulation::Y_SIZE, lowestDarkBaseZ) * 2.0f - 1.0f;
+                        float noiseValZ = sim.getNoiseVal((x + 3) % AtmosphereSimulation::X_SIZE, y, (lowestDarkBaseZ + 4) % AtmosphereSimulation::Z_SIZE) * 2.0f - 1.0f;
+                        
+                        float warpX = noiseValX * 0.75f;
+                        float warpY = noiseValY * 0.75f;
+                        float warpZ = noiseValZ * 0.70f;
+                        
+                        _drops[i].x = (float)x + 0.5f + warpX + (random(100) - 50) * 0.004f;
+                        _drops[i].y = (float)y + 0.5f + warpY + (random(100) - 50) * 0.004f;
+                        _drops[i].z = (float)lowestDarkBaseZ + 0.5f + warpZ - 0.45f; // 严格在最低乌云底正下方
+                        
+                        const AirCell& baseCell = sim.getCell(x, y, lowestDarkBaseZ);
+                        _drops[i].vx = baseCell.velocityX * 0.35f;
+                        _drops[i].vy = baseCell.velocityY * 0.35f;
+                        _drops[i].vz = -5.5f - (random(100) / 25.0f); // 强劲向下垂直重力初速度
+                        break;
                     }
                 }
             }
@@ -402,7 +394,7 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 // 几何视线深度计算（标准 3D 摄像机视线深度，depth 越大表示离眼睛越远）：
                 float dx = wx - 7.5f;
                 float dy = wy - 7.5f;
-                float dz = (wz - 4.0f) * (cam.heightScale / cam.scale);
+                float dz = (wz - 5.5f) * (cam.heightScale / cam.scale);
                 float y1 = dx * sinA + dy * cosA;
                 // depth = y1 * cosE - dz * sinE (严格连续的视线物理深度)
                 float depth = y1 * cosE - dz * sinE;
@@ -561,12 +553,20 @@ void Renderer::drawWindParticles(const AtmosphereSimulation& sim, const Camera& 
             color = RGB565((uint8_t)(100 * alpha), (uint8_t)(190 * alpha), (uint8_t)(255 * alpha));
         }
 
-        int sx, sy;
-        cam.project(_windParticles[i].x, _windParticles[i].y, _windParticles[i].z, sx, sy);
+        const AirCell& c = sim.getCell(gx, gy, gz);
+        float vx = c.velocityX;
+        float vy = c.velocityY;
+        float vz = c.velocityZ;
 
-        if (sy >= 0 && sy < SKY_AREA_H && sx >= 0 && sx < SCREEN_W) {
-            int size = (int)(1.0f + alpha);
-            _canvas->fillCircle(sx, sy, size, color);
+        int sx1, sy1, sx2, sy2;
+        cam.project(_windParticles[i].x, _windParticles[i].y, _windParticles[i].z, sx1, sy1);
+        cam.project(_windParticles[i].x - vx * 0.08f, 
+                    _windParticles[i].y - vy * 0.08f, 
+                    _windParticles[i].z - vz * 0.08f, sx2, sy2);
+
+        if (sy1 >= 0 && sy1 < SKY_AREA_H && sy2 >= 0 && sy2 < SKY_AREA_H &&
+            sx1 >= 0 && sx1 < SCREEN_W && sx2 >= 0 && sx2 < SCREEN_W) {
+            _canvas->drawLine(sx1, sy1, sx2, sy2, color);
         }
     }
 }
