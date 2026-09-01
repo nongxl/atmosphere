@@ -12,6 +12,14 @@ struct RainDrop {
     bool active;
 };
 
+struct WindParticle {
+    float x, y, z;
+    float life;
+    float maxLife;
+    bool active;
+    float alpha;
+};
+
 class Renderer {
 public:
     Renderer();
@@ -19,7 +27,7 @@ public:
     // 初始化渲染器并设置画布
     void init(M5Canvas* canvas);
 
-    // 更新雨滴粒子系统
+    // 更新粒子系统（雨滴和风粒子）
     void updateParticles(const AtmosphereSimulation& sim, float dt);
 
     // 绘制整个世界（背景、体积云、降雨、闪电、状态栈）
@@ -29,6 +37,7 @@ public:
 private:
     M5Canvas* _canvas;
     RainDrop _drops[MAX_RAIN_DROPS];
+    WindParticle _windParticles[60];
 
     // 绘制天空渐变背景
     void drawSkyBackground(float extTemp);
@@ -39,7 +48,10 @@ private:
     float sampleDensity(const AtmosphereSimulation& sim, int x, int y, int z) const;
 
     // 绘制雨滴
-    void drawRain(const Camera& cam);
+    void drawRain(const AtmosphereSimulation& sim, const Camera& cam);
+
+    // 绘制风粒子
+    void drawWindParticles(const AtmosphereSimulation& sim, const Camera& cam);
 
     // 绘制状态栈信息
     void drawStatusBar(float extTemp, float extHum, float extPres, float extMicDb, int activeCloudCount, float electricCharge, int fps);

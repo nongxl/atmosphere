@@ -281,8 +281,8 @@ void Renderer::draw(AtmosphereSimulation& sim, const Camera& cam, float extTemp,
     // 3. 绘制体积云（内部根据 _lightningFrames 与物理 3D 距离计算扩散光照）
     drawClouds(sim, cam, densityThreshold);
 
-    // 4. 绘制雨滴
-    drawRain(cam);
+    // 4. 绘制雨滴（严格只在真实云层下方至地面之间呈现）
+    drawRain(sim, cam);
 
     // 5. 绘制闪电外显电弧（纯云内闪电不绘制电弧线）
     if (_lightningFrames > 0 && _lightningType > 0) {
@@ -571,9 +571,23 @@ void Renderer::drawWindParticles(const AtmosphereSimulation& sim, const Camera& 
     }
 }
 
-void Renderer::drawRain(const Camera& cam) {
+void Renderer::drawRain(const AtmosphereSimulation& sim, const Camera& cam) {
     for (int i = 0; i < MAX_RAIN_DROPS; i++) {
         if (!_drops[i].active) continue;
+
+        int gx = (int)_drops[i].x;
+        int gy = (int)_drops[i].y;
+        if (gx < 0 || gx >= AtmosphereSimulation::X_SIZE ||
+            gy < 0 || gy >= AtmosphereSimulation::Y_SIZE) continue;
+
+        // 物理遮蔽检查：如果当前位置上方根本没有任何厚云，雨滴在视觉上隐藏（绝不凭空下雨）
+        float maxCloudAbove = 0.0f;
+        int dropZ = (int)_drops[i].z;
+        for (int z = (dropZ >= 0 ? dropZ : 0); z < AtmosphereSimulation::Z_SIZE; z++) {
+            float d = sim.getCell(gx, gy, z).cloudDensity;
+            if (d > maxCloudAbove) maxCloudAbove = d;
+        }
+        if (maxCloudAbove < 0.30f) continue; // 上方无厚云，强制隐藏
 
         int sx1, sy1, sx2, sy2;
         // 起点与终点（拉出一条短线段，体现下落动态风速效果）

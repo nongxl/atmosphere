@@ -234,18 +234,12 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
                     }
                 }
 
-                float buoyancy = (cur.temperature - extTemp) * 0.007f * dt;
-                // 对流层顶逆温阻尼：当上升至高空 (z >= 7) 时，强烈衰减垂直对流速度，使云层稳定悬浮形成砧状云顶
-                if (z >= 7) {
-                    float tropoFactor = (float)(z - 7) / 4.0f;
-                    buoyancy -= 0.015f * tropoFactor * dt;
-                    next.velocityZ *= (1.0f - 0.45f * tropoFactor * dt);
-                }
+                float buoyancy = (cur.temperature - extTemp) * 0.015f * dt;
                 next.velocityZ += buoyancy;
 
                 next.velocityX *= (1.0f - 0.12f * dt);
                 next.velocityY *= (1.0f - 0.12f * dt);
-                next.velocityZ *= (1.0f - 0.15f * dt);
+                next.velocityZ *= (1.0f - 0.10f * dt);
 
                 // 【核心台风动力气旋风场注入】
                 if (_typhoonGrowth > 0.02f) {
@@ -528,23 +522,22 @@ void AtmosphereSimulation::injectCyclone() {
                     if (z <= 3) {
                         // 低层：注入强烈暖湿气流，触发强对流
                         cell.temperature = fmaxf(cell.temperature, 40.0f * factor + 28.0f * (1.0f - factor));
-                        cell.vapor       = fminf(1.0f, cell.vapor + 0.8f * factor);
-                    } else if (z <= 6) {
-                        // 中层：注入暖湿气流
-                        cell.temperature = fmaxf(cell.temperature, 30.0f * factor + 20.0f * (1.0f - factor));
-                        cell.vapor       = fminf(1.0f, cell.vapor + 0.6f * factor);
+                        cell.vapor       = fminf(1.0f, cell.vapor + 0.90f * factor);
+                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.40f * factor);
+                    } else if (z <= 7) {
+                        // 中层：主对流云柱，深沉厚重
+                        cell.temperature = fmaxf(cell.temperature, 25.0f * factor + 15.0f * (1.0f - factor));
+                        cell.vapor       = fminf(1.0f, cell.vapor + 0.85f * factor);
+                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.55f * factor);
                     } else {
-                        // 高层：注入水分并降温，促进凝结
-                        cell.vapor = fminf(1.0f, cell.vapor + 0.5f * factor);
-                        if (cell.temperature > 5.0f) {
-                            cell.temperature -= 12.0f * factor;
-                        }
-                        // 高层添加少量初始云密度，让效果更快显现
-                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.25f * factor);
+                        // 高层(z=8~11)：冰晶凝结层，构造宽阔耀眼的砧状纯白云砧 (Anvil Top)
+                        cell.vapor = fminf(1.0f, cell.vapor + 0.80f * factor);
+                        cell.temperature = fminf(cell.temperature, 2.0f - (float)(z - 7) * 4.0f); // 极寒高空冰晶
+                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.65f * factor);
                     }
 
-                    // 增强上升气流（加速水汽输送到高空）
-                    cell.velocityZ += 9.0f * factor * zRatio;
+                    // 贯通全高度的强劲上升气流（水汽直冲对流层天顶）
+                    cell.velocityZ += 8.0f * factor * (0.35f + 0.65f * zRatio);
 
                     // 逆时针旋转
                     if (dist > 0.1f) {
