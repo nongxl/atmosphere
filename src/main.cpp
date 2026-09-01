@@ -118,12 +118,12 @@ void loop() {
 
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
-            // 航模级 3D 欧拉角姿态解算：
-            // 1. 左右侧倾角 (Roll)：使用短边 ax 与垂直轴解算水平旋转
-            float currentRoll = atan2f(ax, fmaxf(0.1f, sqrtf(ay * ay + az * az)));
+            // 航模级 3D 欧拉角姿态解算（严格对齐 M5StickS3 板载芯片物理轴）：
+            // 1. 左右侧倾角 (Roll)：使用短边横向 ay 与垂直法向解算水平环视旋转
+            float currentRoll = atan2f(ay, fmaxf(0.1f, sqrtf(ax * ax + az * az)));
 
-            // 2. 前后俯仰角 (Pitch)：使用长边 -ay 与法向 az 解算垂直俯仰，补偿 45° 手持基准角 (0.785 rad)
-            float currentPitch = atan2f(-ay, az) - 0.785f;
+            // 2. 前后俯仰角 (Pitch)：使用长边纵向 -ax 与法向 az 解算垂直俯仰，补偿 45° 手持基准角 (0.785 rad)
+            float currentPitch = atan2f(-ax, az) - 0.785f;
 
             // EMA 低通滤波（平滑旋转运动）
             const float IMU_LPF_ALPHA = 0.82f;
@@ -136,8 +136,8 @@ void loop() {
             float effectiveY = fabsf(imuY) > IMU_DEADZONE ? (imuY > 0 ? imuY - IMU_DEADZONE : imuY + IMU_DEADZONE) : 0.0f;
 
             // 3D 视角环绕映射：
-            // 左右转动控制方位角 azimuth（增益 1.4，范围 ±70°）
-            // 前后俯仰控制仰角 elevation（增益 1.2，范围 ±40°，前倾俯瞰云顶，后仰平视云身）
+            // 左右转动 (Roll) 严格且仅控制方位角 azimuth（增益 1.4，范围 ±70°）
+            // 前后俯仰 (Pitch) 严格且仅控制俯仰角 elevation（增益 1.2，范围 ±40°）
             const float MAX_AZIMUTH   = 1.20f;
             const float MAX_ELEVATION = 0.70f;
 

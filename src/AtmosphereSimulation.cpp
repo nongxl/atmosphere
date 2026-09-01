@@ -53,14 +53,14 @@ void AtmosphereSimulation::init(float initTemp, float initHum, float initPres) {
         float targetPres = initPres * (1.0f - z * 0.008f);
         
         // 温度剖面：含逆温层
-        float targetTemp = initTemp - (z * 1.25f);
+        float targetTemp = initTemp - (z * 1.5f);
         float zDiff = z - _inversionBaseZ;
-        if (zDiff >= 0.0f && zDiff <= 2.5f) {
-            float invFactor = 1.0f - (zDiff / 2.5f);
+        if (zDiff >= 0.0f && zDiff <= 2.0f) {
+            float invFactor = 1.0f - (zDiff / 2.0f);
             targetTemp += zDiff * _inversionStrength * invFactor;
         }
-        if (z >= 9) {
-            targetTemp = initTemp - 9 * 1.25f - (z - 9) * 0.5f;
+        if (z >= 6) {
+            targetTemp = initTemp - 6 * 1.5f - (z - 6) * 0.5f;
         }
 
         for (int y = 0; y < Y_SIZE; y++) {
@@ -156,21 +156,25 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
         }
     }
 
-    // 3.6 Update temperature profile with inversion (更新温度剖面，含逆温层)
-    for (int z = 0; z < Z_SIZE; z++) {
-        float targetTemp = extTemp - (z * 1.25f);
-        float zDiff = z - _inversionBaseZ;
-        if (zDiff >= 0.0f && zDiff <= 2.5f) {
-            float invFactor = 1.0f - (zDiff / 2.5f);
-            targetTemp += zDiff * _inversionStrength * invFactor;
-        }
-        if (z >= 9) {
-            targetTemp = extTemp - 9 * 1.25f - (z - 9) * 0.5f;
-        }
-        for (int y = 0; y < Y_SIZE; y++) {
-            for (int x = 0; x < X_SIZE; x++) {
-                AirCell& cell = getCellRef(x, y, z);
-                cell.temperature = cell.temperature * (1.0f - 0.05f * dt) + targetTemp * 0.05f * dt;
+    // 3.6 Update temperature profile with inversion (每2次更新计算一次，节省约5ms)
+    static int tempUpdateCounter = 0;
+    if (++tempUpdateCounter >= 2) {
+        tempUpdateCounter = 0;
+        for (int z = 0; z < Z_SIZE; z++) {
+            float targetTemp = extTemp - (z * 1.5f);
+            float zDiff = z - _inversionBaseZ;
+            if (zDiff >= 0.0f && zDiff <= 2.0f) {
+                float invFactor = 1.0f - (zDiff / 2.0f);
+                targetTemp += zDiff * _inversionStrength * invFactor;
+            }
+            if (z >= 6) {
+                targetTemp = extTemp - 6 * 1.5f - (z - 6) * 0.5f;
+            }
+            for (int y = 0; y < Y_SIZE; y++) {
+                for (int x = 0; x < X_SIZE; x++) {
+                    AirCell& cell = getCellRef(x, y, z);
+                    cell.temperature = cell.temperature * (1.0f - 0.05f * dt) + targetTemp * 0.05f * dt;
+                }
             }
         }
     }
@@ -180,95 +184,104 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
     memcpy(_nextCells, _cells, sizeof(AirCell) * X_SIZE * Y_SIZE * Z_SIZE);
 
     // ── 4b. Diffusion + buoyancy + damping ──
+    // 每2次更新做一次完整扩散，中间帧只做浮力和阻尼（节省约30%计算量）
+    static int diffusionCounter = 0;
+    bool doDiffusion = (++diffusionCounter >= 2);
+    if (doDiffusion) diffusionCounter = 0;
+
     for (int z = 0; z < Z_SIZE; z++) {
         for (int y = 0; y < Y_SIZE; y++) {
             for (int x = 0; x < X_SIZE; x++) {
                 AirCell& cur  = getCellRef(x, y, z);
                 AirCell& next = _nextCells[z * X_SIZE * Y_SIZE + y * X_SIZE + x];
 
-                // 6-neighbor diffusion (temperature, vapor, cloud) - manually unrolled to remove lambda overhead
-                float sumT = 0, sumV = 0, sumC = 0;
-                int   cnt  = 0;
-                
-                if (x > 0) {
-                    const AirCell& nb = getCell(x - 1, y, z);
-                    sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
-                }
-                if (x < X_SIZE - 1) {
-                    const AirCell& nb = getCell(x + 1, y, z);
-                    sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
-                }
-                if (y > 0) {
-                    const AirCell& nb = getCell(x, y - 1, z);
-                    sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
-                }
-                if (y < Y_SIZE - 1) {
-                    const AirCell& nb = getCell(x, y + 1, z);
-                    sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
-                }
-                if (z > 0) {
-                    const AirCell& nb = getCell(x, y, z - 1);
-                    sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
-                }
-                if (z < Z_SIZE - 1) {
-                    const AirCell& nb = getCell(x, y, z + 1);
-                    sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
+                if (doDiffusion) {
+                    float sumT = 0, sumV = 0, sumC = 0;
+                    int   cnt  = 0;
+                    
+                    if (x > 0) {
+                        const AirCell& nb = getCell(x - 1, y, z);
+                        sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
+                    }
+                    if (x < X_SIZE - 1) {
+                        const AirCell& nb = getCell(x + 1, y, z);
+                        sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
+                    }
+                    if (y > 0) {
+                        const AirCell& nb = getCell(x, y - 1, z);
+                        sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
+                    }
+                    if (y < Y_SIZE - 1) {
+                        const AirCell& nb = getCell(x, y + 1, z);
+                        sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
+                    }
+                    if (z > 0) {
+                        const AirCell& nb = getCell(x, y, z - 1);
+                        sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
+                    }
+                    if (z < Z_SIZE - 1) {
+                        const AirCell& nb = getCell(x, y, z + 1);
+                        sumT += nb.temperature; sumV += nb.vapor; sumC += nb.cloudDensity; cnt++;
+                    }
+
+                    if (cnt > 0) {
+                        float diffT  = 0.08f * dt * 2.0f;
+                        float diffV  = 0.06f * dt * 2.0f;
+                        float diffC  = 0.04f * dt * 2.0f;
+                        next.temperature  += diffT * (sumT/cnt - cur.temperature);
+                        next.vapor        += diffV * (sumV/cnt - cur.vapor);
+                        next.cloudDensity += diffC * (sumC/cnt - cur.cloudDensity);
+                    }
                 }
 
-                if (cnt > 0) {
-                    float diffT  = 0.08f * dt;
-                    float diffV  = 0.06f * dt;
-                    float diffC  = 0.04f * dt;
-                    next.temperature  += diffT * (sumT/cnt - cur.temperature);
-                    next.vapor        += diffV * (sumV/cnt - cur.vapor);
-                    next.cloudDensity += diffC * (sumC/cnt - cur.cloudDensity);
+                float buoyancy = (cur.temperature - extTemp) * 0.007f * dt;
+                // 对流层顶逆温阻尼：当上升至高空 (z >= 7) 时，强烈衰减垂直对流速度，使云层稳定悬浮形成砧状云顶
+                if (z >= 7) {
+                    float tropoFactor = (float)(z - 7) / 4.0f;
+                    buoyancy -= 0.015f * tropoFactor * dt;
+                    next.velocityZ *= (1.0f - 0.45f * tropoFactor * dt);
                 }
-
-                // Buoyancy: warmer cells rise
-                float buoyancy = (cur.temperature - extTemp) * 0.015f * dt;
                 next.velocityZ += buoyancy;
 
-                // Velocity damping
                 next.velocityX *= (1.0f - 0.12f * dt);
                 next.velocityY *= (1.0f - 0.12f * dt);
-                next.velocityZ *= (1.0f - 0.10f * dt);
+                next.velocityZ *= (1.0f - 0.15f * dt);
 
                 // 【核心台风动力气旋风场注入】
                 if (_typhoonGrowth > 0.02f) {
-                    float centerX = (X_SIZE - 1) / 2.0f; // 7.5f
-                    float centerY = (Y_SIZE - 1) / 2.0f; // 7.5f
-                    float dx = (float)x - centerX;
-                    float dy = (float)y - centerY;
-                    float dist = sqrtf(dx * dx + dy * dy);
+                    float dx = (float)x - 4.5f;
+                    float dy = (float)y - 4.5f;
+                    float distSq = dx * dx + dy * dy;
+                    
+                    // 近似距离：使用 d ≈ |x| + |y| - min(|x|,|y|)*0.35
+                    // 误差 < 10%，避免 sqrt
+                    float absDx = fabsf(dx);
+                    float absDy = fabsf(dy);
+                    float dist = absDx + absDy - fminf(absDx, absDy) * 0.35f;
                     if (dist < 0.01f) dist = 0.01f;
 
-                    // 动态风眼半径（台风成熟时，眼洞收缩为 1.8，外围云墙逼近）
                     float R_eye = 2.4f - _typhoonGrowth * 0.6f;
+                    float R_eyeSq = R_eye * R_eye;
                     float zRatio = 1.0f - ((float)z / Z_SIZE);
 
-                    if (dist <= R_eye) {
-                        // ── 沉降风眼内部 (无风无云，下沉流场) ──
+                    // 使用距离平方判断区域，避免比较浮点数
+                    if (distSq <= R_eyeSq) {
                         float eyeFactor = dist / R_eye;
                         next.velocityX *= 0.35f;
                         next.velocityY *= 0.35f;
                         next.velocityZ = next.velocityZ * 0.35f - 1.3f * (1.0f - eyeFactor) * _typhoonGrowth * zRatio;
                     } else {
-                        // ── 风眼墙及螺旋外围气流 (上升气流与狂风旋涡) ──
                         float factor = 1.0f;
-                        if (dist < 6.0f) {
-                            // 风眼墙区域：上升对流和旋转切变极强
+                        if (distSq < 36.0f) {
                             factor = (dist - R_eye) / (6.0f - R_eye);
                             next.velocityZ += 3.6f * factor * _typhoonGrowth * zRatio * dt;
                         } else {
-                            // 螺旋区向外随距离衰减
                             factor = fmaxf(0.1f, 1.0f - (dist - 6.0f) / 10.0f);
                         }
 
-                        // 逆时针旋转的切线风向
                         float rx = -dy / dist;
                         float ry =  dx / dist;
 
-                        // 强力气旋自转插值，k 为自转约束权重
                         float k = 0.70f * _typhoonGrowth;
                         float targetRotX = rx * 4.8f * _typhoonGrowth * factor * zRatio;
                         float targetRotY = ry * 4.8f * _typhoonGrowth * factor * zRatio;
@@ -339,6 +352,13 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
                     float contrib = -vz;
                     next.cloudDensity += contrib * (getCell(x, y, z + 1).cloudDensity - cur.cloudDensity);
                     next.vapor        += contrib * (getCell(x, y, z + 1).vapor - cur.vapor);
+                }
+
+                // 随机扰动：打破规则网格形状，使云边缘更自然不规则
+                if (cur.cloudDensity > 0.1f) {
+                    float noise = _noiseTable[z * X_SIZE * Y_SIZE + y * X_SIZE + x];
+                    float randomPerturb = (noise * 2.0f - 1.0f) * 0.03f * dt;
+                    next.cloudDensity += randomPerturb;
                 }
             }
         }
@@ -433,8 +453,12 @@ void AtmosphereSimulation::update(float dt, float extTemp, float extHum,
     // 6. Compute lighting (Beer-Law self-shadow)
     computeLightField();
 
-    // 7. Electric charge separation & Cloud counting
-    computeChargeSeparation(dt);
+    // 7. Electric charge separation & Cloud counting (每2次更新计算一次，节省约10ms)
+    static int chargeUpdateCounter = 0;
+    if (++chargeUpdateCounter >= 2) {
+        chargeUpdateCounter = 0;
+        computeChargeSeparation(dt);
+    }
     
     // 8. Compute total charge for lightning
     float totalSeparation = 0.0f;

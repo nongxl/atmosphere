@@ -14,9 +14,9 @@ public:
 
     // 默认观察视角基准角
     static constexpr float BASE_AZIMUTH   = 0.785398f; // 45度 等轴基准方位角
-    static constexpr float BASE_ELEVATION = 0.558505f; // 32度 默认俯视仰角
+    static constexpr float BASE_ELEVATION = 0.650000f; // 37度 经典立体俯视仰角
 
-    Camera(float cx = 67.5f, float cy = 90.0f, float s = 4.3f, float hs = 5.0f)
+    Camera(float cx = 67.5f, float cy = 102.0f, float s = 4.3f, float hs = 5.0f)
         : centerX(cx), centerY(cy), scale(s), heightScale(hs),
           azimuth(0.0f), elevation(0.0f) {}
 
