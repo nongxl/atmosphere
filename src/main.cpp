@@ -15,7 +15,7 @@ static AtmosphereSimulation* sim = nullptr;
 static Camera* camera = nullptr;
 static Renderer* renderer = nullptr;
 
-static uint32_t lastFrameTimeMs = 0;
+static uint32_t lastFrameMicros = 0;
 static int fps = 0;
 
 void setup() {
@@ -57,7 +57,7 @@ void setup() {
     float p = Sensors::getPressure();
     sim->init(t, h, p);
 
-    lastFrameTimeMs = millis();
+    lastFrameMicros = micros();
     Serial.println("[System] Initialization complete.");
 }
 
@@ -87,15 +87,24 @@ void loop() {
     float extPres  = Sensors::getPressure();
     float extMicDb = Sensors::getMicDb();
 
-    // 2. 帧间隔计算
-    uint32_t now = millis();
-    float dt = (float)(now - lastFrameTimeMs) / 1000.0f;
-    lastFrameTimeMs = now;
-    fps = (int)(1.0f / dt + 0.5f);
-
+    // 2. 帧间隔计算（使用micros提高精度，避免高帧率时dt=0）
+    uint32_t now = micros();
+    float dt = (float)(now - lastFrameMicros) / 1000000.0f;
+    lastFrameMicros = now;
+    
     // 防止极端调试或断点等导致 dt 异常
-    if (dt < 0.001f) dt = 0.001f;
-    if (dt > 0.1f)   dt = 0.1f;
+    if (dt < 0.00001f) dt = 0.00001f;
+    if (dt > 0.1f)     dt = 0.1f;
+    
+    // FPS滤波：使用更强的EMA低通滤波，避免数字抖动
+    static float smoothFps = 0.0f;
+    float rawFps = 1.0f / dt;
+    if (smoothFps <= 0.0f) {
+        smoothFps = rawFps;
+    } else {
+        smoothFps = smoothFps * 0.92f + rawFps * 0.08f;
+    }
+    fps = (int)(smoothFps + 0.5f);
 
     // 2.5 IMU 相机控制（透过窗户观察：设备倾斜控制视角旋转）
     {
@@ -107,64 +116,84 @@ void loop() {
 
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
-            // 竖屏映射：屏幕X=设备Y, 屏幕Y=设备-X (参考venom项目，调整符号)
-            float sX = ay;
-            float sY = -ax;
-            float sZ = az;
+            // 竖屏（Rotation 0，135x240）物理轴直接映射：
+            // ax 对应屏幕左右侧倾 (Roll)
+            // ay 对应屏幕前后俯仰 (Pitch)，补偿正常手持倾角基准偏置 ~0.55G
+            float rawRoll = ax;
+            float rawPitch = ay + 0.55f;
 
-            // EMA 低通滤波（参考 venom 项目参数）
-            const float IMU_LPF_ALPHA = 0.92f;
-            imuX = imuX * IMU_LPF_ALPHA + sX * (1.0f - IMU_LPF_ALPHA);
-            imuY = imuY * IMU_LPF_ALPHA + sY * (1.0f - IMU_LPF_ALPHA);
-            imuZ = imuZ * IMU_LPF_ALPHA + sZ * (1.0f - IMU_LPF_ALPHA);
+            // EMA 低通滤波（平滑视差运动）
+            const float IMU_LPF_ALPHA = 0.85f;
+            imuX = imuX * IMU_LPF_ALPHA + rawRoll * (1.0f - IMU_LPF_ALPHA);
+            imuY = imuY * IMU_LPF_ALPHA + rawPitch * (1.0f - IMU_LPF_ALPHA);
+            imuZ = imuZ * IMU_LPF_ALPHA + az * (1.0f - IMU_LPF_ALPHA);
 
-            // 死区处理：微小倾斜不响应，避免抖动
-            const float IMU_DEADZONE = 0.08f;
-            float effectiveX = fabsf(imuX) > IMU_DEADZONE ? imuX : 0.0f;
-            float effectiveY = fabsf(imuY) > IMU_DEADZONE ? imuY : 0.0f;
+            // 平滑死区处理：避免微小手抖产生的扰动
+            const float IMU_DEADZONE = 0.04f;
+            float effectiveX = fabsf(imuX) > IMU_DEADZONE ? (imuX > 0 ? imuX - IMU_DEADZONE : imuX + IMU_DEADZONE) : 0.0f;
+            float effectiveY = fabsf(imuY) > IMU_DEADZONE ? (imuY > 0 ? imuY - IMU_DEADZONE : imuY + IMU_DEADZONE) : 0.0f;
 
-            // G值直接映射为相机角度（范围约[-1,1] -> 弧度）
-            // 左右倾斜控制 azimuth，前后倾斜控制 elevation
-            const float MAX_AZIMUTH = 0.6f;   // 约34度
-            const float MAX_ELEVATION = 0.5f; // 约29度
+            // 全息视窗映射（视差平移 + 微视角旋转）
+            const float MAX_PAN_X = 22.0f;      // 水平视差平移 ±22 像素
+            const float MAX_PAN_Y = 18.0f;      // 垂直视差平移 ±18 像素
+            const float MAX_AZIMUTH = 0.35f;    // 水平旋转角 ±20 度 (产生立体侧视)
+            const float MAX_ELEVATION = 0.30f;  // 仰角偏移 ±17 度 (产生俯视/侧视)
+
+            camera->panX = clampF(-effectiveX * MAX_PAN_X, -MAX_PAN_X, MAX_PAN_X);
+            camera->panY = clampF(effectiveY * MAX_PAN_Y, -MAX_PAN_Y, MAX_PAN_Y);
             camera->azimuth = clampF(-effectiveX * MAX_AZIMUTH, -MAX_AZIMUTH, MAX_AZIMUTH);
-            camera->elevation = clampF(-effectiveY * MAX_ELEVATION, -MAX_ELEVATION, MAX_ELEVATION);
+            camera->elevation = clampF(effectiveY * MAX_ELEVATION, -MAX_ELEVATION, MAX_ELEVATION);
 
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
                 lastPrintMs = millis();
-                Serial.printf("[IMU] Accel: %.2f,%.2f,%.2f | IMU X/Y: %.2f,%.2f | Az/Elev: %.2f,%.2f\n",
-                              ax, ay, az, imuX, imuY, camera->azimuth, camera->elevation);
+                Serial.printf("[IMU] Accel: %.2f,%.2f,%.2f | Pan: %.1f,%.1f | Az/Elev: %.2f,%.2f\n",
+                              ax, ay, az, camera->panX, camera->panY, camera->azimuth, camera->elevation);
             }
         }
     }
 
-    // 3. 物理模拟演化 (累积步长达到 50ms 时才执行流体引擎更新，将流体计算降频至 20Hz)
-    // 这样做在渲染高帧率时，可省去大部分物理算力，使 IMU 相机控制和粒子降雨保持极高帧率
+    // 3. 物理模拟演化 (累积步长达到 80ms 时才执行流体引擎更新，将流体计算降频至 12Hz)
     static float accumulatedSimTime = 0.0f;
     accumulatedSimTime += dt;
-    if (accumulatedSimTime >= 0.05f) {
+    uint32_t simStart = micros();
+    if (accumulatedSimTime >= 0.08f) {
         float simDt = accumulatedSimTime * 1.5f; 
-        if (simDt > 0.1f) simDt = 0.1f;
+        if (simDt > 0.15f) simDt = 0.15f;
         sim->update(simDt, extTemp, extHum, extPres, extMicDb);
         accumulatedSimTime = 0.0f;
     }
+    uint32_t simTime = micros() - simStart;
 
-    // 4. 更新雨滴粒子系统 (使用真实帧步长，使雨滴降落速度流畅)
+    // 4. 更新雨滴粒子系统
+    uint32_t particleStart = micros();
     renderer->updateParticles(*sim, dt);
+    uint32_t particleTime = micros() - particleStart;
 
     // 5. 渲染画面
+    uint32_t renderStart = micros();
     canvas.clear();
     renderer->draw(*sim, *camera, extTemp, extHum, extPres, extMicDb, fps);
+    uint32_t renderTime = micros() - renderStart;
 
     // 6. 推送显示
+    uint32_t pushStart = micros();
     canvas.pushSprite(0, 0);
+    uint32_t pushTime = micros() - pushStart;
 
-    // 7. 帧率控制 (约 30 FPS，包含合理空闲礼让，防止 CPU 100% 挂载)
+    // 7. 帧率控制
     uint32_t elapsed = millis() - now;
     if (elapsed < FRAME_INTERVAL_MS) {
         delay(FRAME_INTERVAL_MS - elapsed);
     } else {
-        delay(2); // 即使帧渲染超时，也强制礼让 2ms 给系统后台任务调度
+        delay(2);
+    }
+
+    // 性能日志（每秒输出一次）
+    static uint32_t lastPerfLog = 0;
+    if (millis() - lastPerfLog >= 1000) {
+        lastPerfLog = millis();
+        Serial.printf("[Perf] FPS:%d | Sim:%dµs | Particle:%dµs | Render:%dµs | Push:%dµs\n",
+                      fps, simTime, particleTime, renderTime, pushTime);
     }
 }

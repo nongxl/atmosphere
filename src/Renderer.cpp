@@ -45,6 +45,9 @@ Renderer::Renderer()
     for (int i = 0; i < MAX_RAIN_DROPS; i++) {
         _drops[i].active = false;
     }
+    for (int i = 0; i < 60; i++) {
+        _windParticles[i].active = false;
+    }
 }
 
 void Renderer::init(M5Canvas* canvas) {
@@ -52,26 +55,31 @@ void Renderer::init(M5Canvas* canvas) {
 }
 
 void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
-    // 1. 生成雨滴
-    // 遍历模拟网格的云层
+    // 1. 生成雨滴（只从云底生成）
     for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
         for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
             for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
                 const AirCell& cell = sim.getCell(x, y, z);
                 
-                // 只有当云密度大到降雨阈值，且随机命中时，在云底产生雨滴
-                if (cell.cloudDensity > 0.65f && (random(1000) < 18)) {
-                    // 寻找到空闲的雨滴槽
+                // 只有当当前格子有云，且下方格子没有云（云底）时才生成雨滴
+                bool isCloudBottom = false;
+                if (z > 0) {
+                    const AirCell& belowCell = sim.getCell(x, y, z - 1);
+                    isCloudBottom = (cell.cloudDensity > 0.5f) && (belowCell.cloudDensity < 0.3f);
+                } else {
+                    isCloudBottom = cell.cloudDensity > 0.5f;
+                }
+                
+                if (isCloudBottom && (random(1000) < 15)) {
                     for (int i = 0; i < MAX_RAIN_DROPS; i++) {
                         if (!_drops[i].active) {
                             _drops[i].active = true;
                             _drops[i].x = (float)x + (random(100) / 100.0f);
                             _drops[i].y = (float)y + (random(100) / 100.0f);
-                            _drops[i].z = (float)z;
-                            // 继承网格水平风速，重力向下
+                            _drops[i].z = (float)z - 0.3f; // 从云底略下方生成
                             _drops[i].vx = cell.velocityX;
                             _drops[i].vy = cell.velocityY;
-                            _drops[i].vz = -4.5f - (random(100) / 50.0f);
+                            _drops[i].vz = -3.5f - (random(100) / 50.0f);
                             break;
                         }
                     }
@@ -107,6 +115,81 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
             _drops[i].x < 0.0f || _drops[i].x >= AtmosphereSimulation::X_SIZE ||
             _drops[i].y < 0.0f || _drops[i].y >= AtmosphereSimulation::Y_SIZE) {
             _drops[i].active = false;
+        }
+    }
+
+    // 3. 生成风粒子（根据风速动态调整生成率）
+    float avgSpeed = 0.0f;
+    int sampleCount = 0;
+    for (int z = 0; z < AtmosphereSimulation::Z_SIZE; z++) {
+        for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
+            for (int x = 0; x < AtmosphereSimulation::X_SIZE; x += 2) {
+                const AirCell& c = sim.getCell(x, y, z);
+                avgSpeed += sqrtf(c.velocityX * c.velocityX + c.velocityY * c.velocityY);
+                sampleCount++;
+            }
+        }
+    }
+    avgSpeed /= (float)sampleCount;
+    
+    // 只有风速足够时才生成风粒子
+    int spawnRate = 0;
+    if (avgSpeed > 0.3f) {
+        spawnRate = (int)((avgSpeed - 0.3f) * 50);
+    }
+    if (sim.getTyphoonGrowth() > 0.1f) {
+        spawnRate = (int)(spawnRate * (1.0f + sim.getTyphoonGrowth() * 2.0f));
+    }
+    
+    if (random(1000) < spawnRate) {
+        for (int i = 0; i < 60; i++) {
+            if (!_windParticles[i].active) {
+                _windParticles[i].active = true;
+                _windParticles[i].x = (float)random(AtmosphereSimulation::X_SIZE);
+                _windParticles[i].y = (float)random(AtmosphereSimulation::Y_SIZE);
+                _windParticles[i].z = (float)random(AtmosphereSimulation::Z_SIZE);
+                _windParticles[i].life = 0.0f;
+                _windParticles[i].maxLife = 6.0f + (random(1000) / 1000.0f) * 8.0f;
+                _windParticles[i].alpha = 0.0f;
+                break;
+            }
+        }
+    }
+
+    // 4. 更新风粒子
+    for (int i = 0; i < 60; i++) {
+        if (!_windParticles[i].active) continue;
+
+        _windParticles[i].life += dt;
+        float lifeRatio = _windParticles[i].life / _windParticles[i].maxLife;
+        
+        // 渐入渐出效果
+        if (lifeRatio < 0.1f) {
+            _windParticles[i].alpha = lifeRatio / 0.1f;
+        } else if (lifeRatio > 0.8f) {
+            _windParticles[i].alpha = (1.0f - lifeRatio) / 0.2f;
+        } else {
+            _windParticles[i].alpha = 1.0f;
+        }
+
+        int gx = (int)_windParticles[i].x;
+        int gy = (int)_windParticles[i].y;
+        int gz = (int)_windParticles[i].z;
+        if (gx >= 0 && gx < AtmosphereSimulation::X_SIZE &&
+            gy >= 0 && gy < AtmosphereSimulation::Y_SIZE &&
+            gz >= 0 && gz < AtmosphereSimulation::Z_SIZE) {
+            const AirCell& c = sim.getCell(gx, gy, gz);
+            _windParticles[i].x += c.velocityX * dt * 2.0f;
+            _windParticles[i].y += c.velocityY * dt * 2.0f;
+            // 减少Z方向影响，避免被云吸引
+            _windParticles[i].z += c.velocityZ * dt * 0.2f;
+        }
+
+        if (_windParticles[i].life >= _windParticles[i].maxLife ||
+            _windParticles[i].x < -2.0f || _windParticles[i].x >= AtmosphereSimulation::X_SIZE + 2.0f ||
+            _windParticles[i].y < -2.0f || _windParticles[i].y >= AtmosphereSimulation::Y_SIZE + 2.0f ||
+            _windParticles[i].z < -2.0f || _windParticles[i].z >= AtmosphereSimulation::Z_SIZE + 2.0f) {
+            _windParticles[i].active = false;
         }
     }
 }
@@ -181,13 +264,16 @@ void Renderer::draw(AtmosphereSimulation& sim, const Camera& cam, float extTemp,
     // 1. 正常渐变绘制天空背景
     drawSkyBackground(extTemp);
 
-    // 2. 绘制体积云（内部根据 _lightningFrames 与物理 3D 距离计算扩散光照）
+    // 2. 绘制风粒子（在云之前绘制，作为背景气流）
+    drawWindParticles(sim, cam);
+
+    // 3. 绘制体积云（内部根据 _lightningFrames 与物理 3D 距离计算扩散光照）
     drawClouds(sim, cam, densityThreshold);
 
-    // 3. 绘制雨滴
+    // 4. 绘制雨滴
     drawRain(cam);
 
-    // 4. 绘制闪电外显电弧（纯云内闪电不绘制电弧线）
+    // 5. 绘制闪电外显电弧（纯云内闪电不绘制电弧线）
     if (_lightningFrames > 0 && _lightningType > 0) {
         float intensity = _lightningFlicker[5 - _lightningFrames];
         
@@ -249,37 +335,27 @@ void Renderer::drawSkyBackground(float extTemp) {
 }
 
 void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, float densityThreshold) {
-    int drawBudget = 55;
+    // 帧预算：保持 65 个云粒子（约 195 个填充圆，高拟真云海同时维持 50+ FPS）
+    int drawBudget = 65;
 
-    // 动态视口自适应循环方向选择（Front-to-Back）
-    int xStart = 0, xEnd = AtmosphereSimulation::X_SIZE, xStep = 1;
-    int yStart = 0, yEnd = AtmosphereSimulation::Y_SIZE, yStep = 1;
-
-    if (cam._cachedCosA > 0.0f) {
-        xStart = AtmosphereSimulation::X_SIZE - 1;
-        xEnd = -1;
-        xStep = -1;
-    }
-    if (cam._cachedSinA > 0.0f) {
-        yStart = AtmosphereSimulation::Y_SIZE - 1;
-        yEnd = -1;
-        yStep = -1;
-    }
-
-    // 从最高层往低层画（z 轴从近到远）
+    // 连续稳定的画家算法拓扑遍历：从高层向低层绘制（近处/低处的云后画，覆盖远处）
+    // 彻底消除因循环方向突变导致的跨帧跳变/闪现 Bug
     for (int z = AtmosphereSimulation::Z_SIZE - 1; z >= 0 && drawBudget > 0; --z) {
-        // 恢复 baseStride = 1 精细采样，令粒子重新贴合重叠，恢复松软庞大的云团质感
-        for (int y = yStart; y != yEnd && drawBudget > 0; y += yStep) {
-            for (int x = xStart; x != xEnd && drawBudget > 0; x += xStep) {
+        for (int y = 0; y < AtmosphereSimulation::Y_SIZE && drawBudget > 0; ++y) {
+            for (int x = 0; x < AtmosphereSimulation::X_SIZE && drawBudget > 0; ++x) {
                 // 读取物理密度
                 float d = sampleDensity(sim, x, y, z);
                 if (d <= densityThreshold) continue;
 
-                // 增加随机抖动打破网格规律感，抖动幅度随密度增大而减小（密集区域保持相对紧凑）
-                float jitterScale = 0.6f * (1.0f - d * 0.5f);
-                float jitterX = ((float)random(200) / 100.0f - 1.0f) * jitterScale;
-                float jitterY = ((float)random(200) / 100.0f - 1.0f) * jitterScale;
-                float jitterZ = ((float)random(200) / 100.0f - 1.0f) * 0.3f;
+                // 使用噪声值作为抖动偏移，避免每帧随机跳变
+                float noiseVal = sim.getNoiseVal(x, y, z) * 2.0f - 1.0f;
+                float noiseVal2 = sim.getNoiseVal((x+5)%AtmosphereSimulation::X_SIZE, (y+7)%AtmosphereSimulation::Y_SIZE, z);
+                float noiseVal3 = sim.getNoiseVal((x+3)%AtmosphereSimulation::X_SIZE, y, (z+2)%AtmosphereSimulation::Z_SIZE);
+                
+                float jitterScale = 0.5f * (1.0f - d * 0.5f);
+                float jitterX = noiseVal * jitterScale;
+                float jitterY = noiseVal2 * jitterScale;
+                float jitterZ = noiseVal3 * 0.25f;
                 int sx, sy;
                 cam.project((float)x + 0.5f + jitterX, (float)y + 0.5f + jitterY, (float)z + 0.5f + jitterZ, sx, sy);
 
@@ -287,9 +363,10 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 if (sx < -15 || sx > SCREEN_W + 15 || sy < -15 || sy > SKY_AREA_H + 15) continue;
 
                 const AirCell& cell = sim.getCell(x, y, z);
-                // 云粒子投影半径，增加随机变化打破均匀感
+                // 云粒子投影半径，使用静态噪声避免抖动
                 float baseRadius = cam.scale * (0.35f + d * 0.85f);
-                float radiusVariation = 0.3f * ((float)random(100) / 100.0f - 0.5f);
+                float radiusNoise = sim.getNoiseVal((x+7)%AtmosphereSimulation::X_SIZE, (y+3)%AtmosphereSimulation::Y_SIZE, (z+5)%AtmosphereSimulation::Z_SIZE);
+                float radiusVariation = 0.25f * (radiusNoise * 2.0f - 1.0f);
                 float r = baseRadius * (1.0f + radiusVariation);
                 if (r < 1.5f) r = 1.5f;
 
@@ -359,39 +436,81 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
     }
 }
 float Renderer::sampleDensity(const AtmosphereSimulation& sim, int x, int y, int z) const {
+    static float lastTimeSec = 0.0f;
+    static float lastFlowMultiplier = 0.0f;
+    static float cachedTimeSec = 0.0f;
+    
+    float flowSpeedMultiplier = 1.0f + 2.0f * sim.getTyphoonGrowth();
+    float currentTime = millis() / 1000.0f;
+    
+    if (currentTime != lastTimeSec || flowSpeedMultiplier != lastFlowMultiplier) {
+        cachedTimeSec = currentTime * flowSpeedMultiplier;
+        lastTimeSec = currentTime;
+        lastFlowMultiplier = flowSpeedMultiplier;
+    }
+    
     float physicalDensity = sim.getCell(x, y, z).cloudDensity;
+    float timeSec = cachedTimeSec;
+    float nx = (float)x / (float)AtmosphereSimulation::X_SIZE;
+    float ny = (float)y / (float)AtmosphereSimulation::Y_SIZE;
+    float nz = (float)z / (float)AtmosphereSimulation::Z_SIZE;
+
+    // 使用多层静态噪声打破规则网格感
+    float staticNoise = sim.getNoiseVal(x, y, z);
+    float staticNoise2 = sim.getNoiseVal((x+3)%AtmosphereSimulation::X_SIZE, (y+5)%AtmosphereSimulation::Y_SIZE, (z+2)%AtmosphereSimulation::Z_SIZE);
+    float staticNoise3 = sim.getNoiseVal((x+7)%AtmosphereSimulation::X_SIZE, (y+2)%AtmosphereSimulation::Y_SIZE, (z+4)%AtmosphereSimulation::Z_SIZE);
     
-    float flowSpeedMultiplier = 1.0f + 2.5f * sim.getTyphoonGrowth();
-    float timeSec = (millis() / 1000.0f) * flowSpeedMultiplier;
-    float nx = (float)x / 16.0f;
-    float ny = (float)y / 16.0f;
-    float nz = (float)z / 12.0f;
+    // 极低频率的时间噪声，使云边缘有极其缓慢的脉动效果
+    float slowTime = timeSec * 0.08f;
+    float timeNoise = fastSin(nx * 8.0f + slowTime) * fastCos(ny * 6.0f + slowTime * 0.7f);
 
-    // 多层分形噪声，使用不同频率和相位，打破周期性规律
-    float n1 = fastSin(nx * 25.13274f + timeSec) *
-               fastCos(ny * 18.84956f + timeSec * 0.7f) *
-               fastSin(nz * 31.41593f + timeSec * 0.4f);
-
-    float n2 = fastSin(nx * 75.39822f + timeSec * 1.3f) *
-               fastCos(ny * 62.83185f + timeSec * 0.9f) *
-               fastSin(nz * 87.96459f + timeSec * 0.6f);
-
-    float n3 = fastSin(nx * 47.12389f + timeSec * 0.5f) *
-               fastCos(ny * 56.54867f + timeSec * 1.2f) *
-               fastSin(nz * 43.98230f + timeSec * 0.8f);
-
-    float n4 = fastSin(nx * 94.24778f + timeSec * 1.5f) *
-               fastCos(ny * 109.95574f + timeSec * 0.3f) *
-               fastSin(nz * 125.66371f + timeSec * 1.1f);
-
-    float noise = 0.4f * n1 + 0.25f * n2 + 0.2f * n3 + 0.15f * n4;
-    
-    float spatialNoise = sim.getNoiseVal(x, y, z) * 0.08f;
-    
-    float edgeNoise = ((noise + 1.0f) * 0.5f) * 0.12f + spatialNoise;
+    // 多层静态噪声混合，大幅增强不规则感
+    float multiNoise = staticNoise * 0.45f + staticNoise2 * 0.35f + staticNoise3 * 0.20f;
+    float edgeNoise = multiNoise * 0.20f + timeNoise * 0.03f;
     return physicalDensity + edgeNoise;
 }
 
+
+void Renderer::drawWindParticles(const AtmosphereSimulation& sim, const Camera& cam) {
+    for (int i = 0; i < 60; i++) {
+        if (!_windParticles[i].active) continue;
+
+        float alpha = _windParticles[i].alpha;
+        if (alpha <= 0.05f) continue;
+        
+        int gx = (int)_windParticles[i].x;
+        int gy = (int)_windParticles[i].y;
+        int gz = (int)_windParticles[i].z;
+        
+        float speed = 0.0f;
+        if (gx >= 0 && gx < AtmosphereSimulation::X_SIZE &&
+            gy >= 0 && gy < AtmosphereSimulation::Y_SIZE &&
+            gz >= 0 && gz < AtmosphereSimulation::Z_SIZE) {
+            const AirCell& c = sim.getCell(gx, gy, gz);
+            speed = sqrtf(c.velocityX * c.velocityX + c.velocityY * c.velocityY);
+        }
+
+        // 风速太低时不绘制风粒子，避免出现静止的暗色圆点
+        if (speed < 0.5f) continue;
+        
+        uint16_t color;
+        if (speed < 2.0f) {
+            color = RGB565((uint8_t)(60 * alpha), (uint8_t)(120 * alpha), (uint8_t)(180 * alpha));
+        } else if (speed < 4.0f) {
+            color = RGB565((uint8_t)(80 * alpha), (uint8_t)(160 * alpha), (uint8_t)(220 * alpha));
+        } else {
+            color = RGB565((uint8_t)(100 * alpha), (uint8_t)(190 * alpha), (uint8_t)(255 * alpha));
+        }
+
+        int sx, sy;
+        cam.project(_windParticles[i].x, _windParticles[i].y, _windParticles[i].z, sx, sy);
+
+        if (sy >= 0 && sy < SKY_AREA_H && sx >= 0 && sx < SCREEN_W) {
+            int size = (int)(1.0f + alpha);
+            _canvas->fillCircle(sx, sy, size, color);
+        }
+    }
+}
 
 void Renderer::drawRain(const Camera& cam) {
     for (int i = 0; i < MAX_RAIN_DROPS; i++) {
