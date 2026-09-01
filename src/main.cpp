@@ -143,9 +143,9 @@ void loop() {
 
             // 3D 轨道球视角赋值 (前后与左右 100% 正交解耦，互不干扰)
             // 左右转动设备 -> 观察云的左侧与右侧 (Azimuth 范围 ±1.4 弧度 ≈ ±80°)
-            // 前后转动设备 -> 观察云的顶部与底部 (Elevation：平放看顶 elevation>0，后仰看底 elevation<0)
-            camera->azimuth = clampF(-effRoll * 1.6f, -1.4f, 1.4f);
-            camera->elevation = clampF(effPitch * 1.1f, -1.2f, 1.2f);
+            // 前后转动设备 -> 观察云的顶部与底部 (Elevation 范围 ±1.2 弧度 ≈ ±70°)
+            camera->azimuth = clampF(effRoll * 1.6f, -1.4f, 1.4f);
+            camera->elevation = clampF(-effPitch * 1.1f, -1.2f, 1.2f);
 
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
