@@ -118,37 +118,37 @@ void loop() {
 
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
-            // 竖屏（Rotation 0，135x240）物理轴映射（对调轴向）：
-            // ay 对应屏幕左右侧倾 (Roll)
-            // ax 对应屏幕前后俯仰 (Pitch)，补偿正常手持倾角基准偏置 ~0.55G
-            float rawRoll = ay;
-            float rawPitch = ax + 0.55f;
+            // 航模级 3D 欧拉角姿态解算：
+            // 1. 左右侧倾角 (Roll)：使用短边 ax 与垂直轴解算水平旋转
+            float currentRoll = atan2f(ax, fmaxf(0.1f, sqrtf(ay * ay + az * az)));
 
-            // EMA 低通滤波（平滑视差运动）
-            const float IMU_LPF_ALPHA = 0.85f;
-            imuX = imuX * IMU_LPF_ALPHA + rawRoll * (1.0f - IMU_LPF_ALPHA);
-            imuY = imuY * IMU_LPF_ALPHA + rawPitch * (1.0f - IMU_LPF_ALPHA);
-            imuZ = imuZ * IMU_LPF_ALPHA + az * (1.0f - IMU_LPF_ALPHA);
+            // 2. 前后俯仰角 (Pitch)：使用长边 -ay 与法向 az 解算垂直俯仰，补偿 45° 手持基准角 (0.785 rad)
+            float currentPitch = atan2f(-ay, az) - 0.785f;
 
-            // 平滑死区处理：避免微小手抖产生的扰动
-            const float IMU_DEADZONE = 0.04f;
+            // EMA 低通滤波（平滑旋转运动）
+            const float IMU_LPF_ALPHA = 0.82f;
+            imuX = imuX * IMU_LPF_ALPHA + currentRoll * (1.0f - IMU_LPF_ALPHA);
+            imuY = imuY * IMU_LPF_ALPHA + currentPitch * (1.0f - IMU_LPF_ALPHA);
+
+            // 平滑死区处理：过滤手部微小生理震颤
+            const float IMU_DEADZONE = 0.03f;
             float effectiveX = fabsf(imuX) > IMU_DEADZONE ? (imuX > 0 ? imuX - IMU_DEADZONE : imuX + IMU_DEADZONE) : 0.0f;
             float effectiveY = fabsf(imuY) > IMU_DEADZONE ? (imuY > 0 ? imuY - IMU_DEADZONE : imuY + IMU_DEADZONE) : 0.0f;
 
-            // 纯 3D 空间环绕视角映射（中心绝对固定，转动设备旋转 3D 观察视角）
-            // 左右侧倾控制水平方位角 (azimuth)，可大范围环视云团四周侧面
-            // 前后俯仰控制俯仰仰角 (elevation)，可从俯视云顶到平视云腰自由观察
-            const float MAX_AZIMUTH   = 1.15f; // 约 66 度水平环视范围
-            const float MAX_ELEVATION = 0.55f; // 约 32 度俯仰仰角范围
+            // 3D 视角环绕映射：
+            // 左右转动控制方位角 azimuth（增益 1.4，范围 ±70°）
+            // 前后俯仰控制仰角 elevation（增益 1.2，范围 ±40°，前倾俯瞰云顶，后仰平视云身）
+            const float MAX_AZIMUTH   = 1.20f;
+            const float MAX_ELEVATION = 0.70f;
 
-            camera->azimuth   = clampF(-effectiveX * MAX_AZIMUTH, -MAX_AZIMUTH, MAX_AZIMUTH);
-            camera->elevation = clampF(effectiveY * MAX_ELEVATION, -MAX_ELEVATION, MAX_ELEVATION);
+            camera->azimuth   = clampF(-effectiveX * 1.4f, -MAX_AZIMUTH, MAX_AZIMUTH);
+            camera->elevation = clampF(effectiveY * 1.2f, -MAX_ELEVATION, MAX_ELEVATION);
 
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
                 lastPrintMs = millis();
-                Serial.printf("[IMU 3D Orbit] Accel: %.2f,%.2f,%.2f | Azimuth: %.2f rad | Elev: %.2f rad\n",
-                              ax, ay, az, camera->azimuth, camera->elevation);
+                Serial.printf("[IMU Euler 3D] Accel:(%.2f,%.2f,%.2f) | Pitch:%.2f rad | Az/Elev:(%.2f,%.2f)\n",
+                              ax, ay, az, currentPitch, camera->azimuth, camera->elevation);
             }
         }
     }

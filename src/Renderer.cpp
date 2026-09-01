@@ -338,9 +338,10 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
     // 帧预算：暴增至 150 个超密云粒子（+150% 密度，超高重叠率彻底消灭单球感，同时稳固 55+ FPS）
     int drawBudget = 150;
 
-    // 连续稳定的画家算法拓扑遍历：从高层向低层绘制（近处/低处的云后画，覆盖远处）
-    for (int z = AtmosphereSimulation::Z_SIZE - 1; z >= 0 && drawBudget > 0; --z) {
-        for (int y = 0; y < AtmosphereSimulation::Y_SIZE && drawBudget > 0; ++y) {
+    // 连续稳定的画家算法拓扑遍历：由底到顶 (z: 0->11)、由远及近 (y: 15->0) 绘制
+    // 确保近景和高空云顶后画并正确覆盖在表面，呈现清晰壮丽的 3D 俯视云层
+    for (int z = 0; z < AtmosphereSimulation::Z_SIZE && drawBudget > 0; ++z) {
+        for (int y = AtmosphereSimulation::Y_SIZE - 1; y >= 0 && drawBudget > 0; --y) {
             for (int x = 0; x < AtmosphereSimulation::X_SIZE && drawBudget > 0; ++x) {
                 // 读取物理密度（内部已做 85% 空体素快速前置跳过）
                 float d = sampleDensity(sim, x, y, z);

@@ -41,17 +41,18 @@ public:
         float z1 = dz;
 
         // 3. 第二步：绕水平轴旋转俯仰角 (Base + Elevation)
+        // 俯视观察模型：相机位于斜上方俯视
         float totalElevation = BASE_ELEVATION + elevation;
-        if (totalElevation < 0.10f) totalElevation = 0.10f; // 防止完全平视翻转
-        if (totalElevation > 1.35f) totalElevation = 1.35f; // 防止超顶俯视
+        if (totalElevation < 0.15f) totalElevation = 0.15f; // 防止平视翻转
+        if (totalElevation > 1.25f) totalElevation = 1.25f; // 防止垂直朝下
         float cosE = cosf(totalElevation);
         float sinE = sinf(totalElevation);
 
-        float x2 = x1;
-        float y2 = y1 * sinE - z1 * cosE; // 屏幕垂直方向投影
+        // 正统俯视投影：远方 (y1>0) 与 高空 (dz>0) 在屏幕上方 (-Y 方向)
+        float projY = -(y1 * sinE + dz * cosE);
 
         // 4. 映射到屏幕中心
-        screenX = (int)roundf(centerX + x2 * 0.95f * scale);
-        screenY = (int)roundf(centerY + y2 * scale);
+        screenX = (int)roundf(centerX + x1 * 0.92f * scale);
+        screenY = (int)roundf(centerY + projY * scale);
     }
 };
