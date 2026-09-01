@@ -338,10 +338,15 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
     // 帧预算：暴增至 150 个超密云粒子（+150% 密度，超高重叠率彻底消灭单球感，同时稳固 55+ FPS）
     int drawBudget = 150;
 
-    // 连续稳定的画家算法拓扑遍历：由底到顶 (z: 0->11)、由远及近 (y: 15->0) 绘制
-    // 确保近景和高空云顶后画并正确覆盖在表面，呈现清晰壮丽的 3D 俯视云层
-    for (int z = 0; z < AtmosphereSimulation::Z_SIZE && drawBudget > 0; ++z) {
-        for (int y = AtmosphereSimulation::Y_SIZE - 1; y >= 0 && drawBudget > 0; --y) {
+    // 动态画家算法深度排序（Back-to-Front）：
+    // 俯视观察云顶(elevation > 0)时：云底在远端(先画)，云顶在近端(后画并覆盖云底，100%展现云顶)
+    // 仰视观察云底(elevation <= 0)时：云顶在远端(先画)，云底在近端(后画并覆盖云顶，100%展现云底)
+    int zStart = (cam.elevation > 0.05f) ? 0 : (AtmosphereSimulation::Z_SIZE - 1);
+    int zEnd   = (cam.elevation > 0.05f) ? AtmosphereSimulation::Z_SIZE : -1;
+    int zStep  = (cam.elevation > 0.05f) ? 1 : -1;
+
+    for (int z = zStart; z != zEnd && drawBudget > 0; z += zStep) {
+        for (int y = 0; y < AtmosphereSimulation::Y_SIZE && drawBudget > 0; ++y) {
             for (int x = 0; x < AtmosphereSimulation::X_SIZE && drawBudget > 0; ++x) {
                 // 读取物理密度（内部已做 85% 空体素快速前置跳过）
                 float d = sampleDensity(sim, x, y, z);
@@ -510,18 +515,18 @@ void Renderer::drawRain(const Camera& cam) {
         if (!_drops[i].active) continue;
 
         int sx1, sy1, sx2, sy2;
-        // 起点与终点（适度短拖尾 0.022s，自然细腻下落雨丝）
+        // 起点与终点（拉出一条短线段，体现下落动态风速效果）
         cam.project(_drops[i].x, _drops[i].y, _drops[i].z, sx1, sy1);
-        cam.project(_drops[i].x - _drops[i].vx * 0.022f, 
-                    _drops[i].y - _drops[i].vy * 0.022f, 
-                    _drops[i].z - _drops[i].vz * 0.022f, sx2, sy2);
+        cam.project(_drops[i].x - _drops[i].vx * 0.05f, 
+                    _drops[i].y - _drops[i].vy * 0.05f, 
+                    _drops[i].z - _drops[i].vz * 0.05f, sx2, sy2);
 
         // 仅在天空绘制区域内进行画线
         if (sy1 >= 0 && sy1 < SKY_AREA_H && sy2 >= 0 && sy2 < SKY_AREA_H &&
             sx1 >= 0 && sx1 < SCREEN_W && sx2 >= 0 && sx2 < SCREEN_W) {
             
-            // 雨滴颜色：半透明冰蓝白色
-            _canvas->drawLine(sx1, sy1, sx2, sy2, RGB565(175, 210, 245));
+            // 雨滴颜色：冰蓝白色
+            _canvas->drawLine(sx1, sy1, sx2, sy2, RGB565(190, 215, 240));
         }
     }
 }
