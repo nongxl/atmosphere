@@ -512,6 +512,9 @@ bool AtmosphereSimulation::consumeLightningEvent() {
 // ─── injectCyclone ─────────────────────────────────────────────────────────
 void AtmosphereSimulation::injectCyclone() {
     // 注入气旋：通过提供暖湿气流和强上升气流来加速云的自然形成过程
+    // 直接激活台风物理引擎能量场，赋予其持续对抗重力坍塌的动力（约维持 50 秒自然衰减）
+    _typhoonGrowth = fmaxf(_typhoonGrowth, 0.8f);
+
     float centerX = (X_SIZE - 1) / 2.0f;
     float centerY = (Y_SIZE - 1) / 2.0f;
 
