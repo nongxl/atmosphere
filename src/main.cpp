@@ -117,10 +117,10 @@ void loop() {
 
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
-            // 竖屏（Rotation 0）：
-            // 左右转动由横向分量 ay 驱动
-            // 前后俯仰转动由垂直屏幕分量 az 驱动（平视竖直时 az≈0，前倾看顶 az>0，后仰看底 az<0）
-            float rawRoll = ay;
+            // 竖屏（Rotation 0，135x240）：
+            // ax 对应屏幕短轴横向分量，严格驱动左右转动 (Azimuth 观察左右侧面)
+            // az 对应屏幕法向分量，严格驱动前后俯仰 (Elevation：前倾看顶 az>0，后仰看底 az<0)
+            float rawRoll = ax;
             float rawPitch = az;
 
             // EMA 低通滤波（平滑旋转视角）
@@ -137,7 +137,7 @@ void loop() {
             // 左右转动设备 -> 观察云的左侧与右侧 (Azimuth 范围 ±1.4 弧度 ≈ ±80°)
             // 前后转动设备 -> 观察云的顶部与底部 (Elevation 范围 ±1.1 弧度 ≈ ±63°)
             camera->azimuth = clampF(-effRoll * 1.5f, -1.4f, 1.4f);
-            camera->elevation = clampF(-effPitch * 1.3f, -1.1f, 1.1f);
+            camera->elevation = clampF(effPitch * 1.3f, -1.1f, 1.1f);
 
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
