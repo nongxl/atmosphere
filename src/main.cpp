@@ -87,24 +87,26 @@ void loop() {
     float extPres  = Sensors::getPressure();
     float extMicDb = Sensors::getMicDb();
 
-    // 2. 帧间隔计算（使用micros提高精度，避免高帧率时dt=0）
+    // 2. 真实 FPS 精确测量器（基于每 500ms 实际完成帧数统计，杜绝微秒抖动与截断死锁）
+    static uint32_t frameCounter = 0;
+    static uint32_t lastFpsCalcMs = 0;
+    static int realFps = 60;
+
+    frameCounter++;
+    uint32_t currentMs = millis();
+    if (currentMs - lastFpsCalcMs >= 500) {
+        realFps = (int)((frameCounter * 1000.0f) / (float)(currentMs - lastFpsCalcMs) + 0.5f);
+        frameCounter = 0;
+        lastFpsCalcMs = currentMs;
+    }
+    fps = realFps;
+
+    // 物理步长计算（限制单步仿真安全上限）
     uint32_t now = micros();
     float dt = (float)(now - lastFrameMicros) / 1000000.0f;
     lastFrameMicros = now;
-    
-    // 防止极端调试或断点等导致 dt 异常
-    if (dt < 0.00001f) dt = 0.00001f;
-    if (dt > 0.1f)     dt = 0.1f;
-    
-    // FPS滤波：使用更强的EMA低通滤波，避免数字抖动
-    static float smoothFps = 0.0f;
-    float rawFps = 1.0f / dt;
-    if (smoothFps <= 0.0f) {
-        smoothFps = rawFps;
-    } else {
-        smoothFps = smoothFps * 0.92f + rawFps * 0.08f;
-    }
-    fps = (int)(smoothFps + 0.5f);
+    if (dt < 0.001f) dt = 0.001f;
+    if (dt > 0.05f)  dt = 0.05f;
 
     // 2.5 IMU 相机控制（透过窗户观察：设备倾斜控制视角旋转）
     {
@@ -181,12 +183,14 @@ void loop() {
     canvas.pushSprite(0, 0);
     uint32_t pushTime = micros() - pushStart;
 
-    // 7. 帧率控制
-    uint32_t elapsed = millis() - now;
-    if (elapsed < FRAME_INTERVAL_MS) {
-        delay(FRAME_INTERVAL_MS - elapsed);
+    // 7. 精确微秒级 60 FPS 帧率控制
+    uint32_t frameEndMicros = micros();
+    uint32_t frameDurationMicros = frameEndMicros - now;
+    const uint32_t TARGET_FRAME_MICROS = 1000000UL / 60UL; // ~16.6ms @ 60 FPS
+    if (frameDurationMicros < TARGET_FRAME_MICROS) {
+        delayMicroseconds(TARGET_FRAME_MICROS - frameDurationMicros);
     } else {
-        delay(2);
+        yield();
     }
 
     // 性能日志（每秒输出一次）
