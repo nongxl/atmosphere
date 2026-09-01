@@ -335,11 +335,10 @@ void Renderer::drawSkyBackground(float extTemp) {
 }
 
 void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, float densityThreshold) {
-    // 帧预算：保持 65 个云粒子（约 195 个填充圆，高拟真云海同时维持 50+ FPS）
-    int drawBudget = 65;
+    // 帧预算：保持 60 个云粒子（高质量无缝融合同时维持 50+ FPS）
+    int drawBudget = 60;
 
     // 连续稳定的画家算法拓扑遍历：从高层向低层绘制（近处/低处的云后画，覆盖远处）
-    // 彻底消除因循环方向突变导致的跨帧跳变/闪现 Bug
     for (int z = AtmosphereSimulation::Z_SIZE - 1; z >= 0 && drawBudget > 0; --z) {
         for (int y = 0; y < AtmosphereSimulation::Y_SIZE && drawBudget > 0; ++y) {
             for (int x = 0; x < AtmosphereSimulation::X_SIZE && drawBudget > 0; ++x) {
@@ -347,28 +346,32 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 float d = sampleDensity(sim, x, y, z);
                 if (d <= densityThreshold) continue;
 
-                // 使用噪声值作为抖动偏移，避免每帧随机跳变
-                float noiseVal = sim.getNoiseVal(x, y, z) * 2.0f - 1.0f;
-                float noiseVal2 = sim.getNoiseVal((x+5)%AtmosphereSimulation::X_SIZE, (y+7)%AtmosphereSimulation::Y_SIZE, z);
-                float noiseVal3 = sim.getNoiseVal((x+3)%AtmosphereSimulation::X_SIZE, y, (z+2)%AtmosphereSimulation::Z_SIZE);
-                
-                float jitterScale = 0.5f * (1.0f - d * 0.5f);
-                float jitterX = noiseVal * jitterScale;
-                float jitterY = noiseVal2 * jitterScale;
-                float jitterZ = noiseVal3 * 0.25f;
+                // 1. 三维多尺度流体空间扭曲 (Domain Warping)
+                // 读取静态空间噪声映射为 [-1.0, 1.0]，施加 ±0.9 ~ ±1.25 网格单位的大幅度空间连续扭曲
+                // 彻底打破 16x16 整数网格的点阵行列感与平行线排列
+                float noiseValX = sim.getNoiseVal(x, y, z) * 2.0f - 1.0f;
+                float noiseValY = sim.getNoiseVal((x + 6) % AtmosphereSimulation::X_SIZE, (y + 9) % AtmosphereSimulation::Y_SIZE, z) * 2.0f - 1.0f;
+                float noiseValZ = sim.getNoiseVal((x + 3) % AtmosphereSimulation::X_SIZE, y, (z + 4) % AtmosphereSimulation::Z_SIZE) * 2.0f - 1.0f;
+
+                float warpX = noiseValX * (0.85f + (1.0f - d) * 0.40f);
+                float warpY = noiseValY * (0.85f + (1.0f - d) * 0.40f);
+                // 垂直高度层波浪扰动（±0.80 格高度），消除水平切片式的分层阶梯感
+                float warpZ = noiseValZ * 0.80f;
+
                 int sx, sy;
-                cam.project((float)x + 0.5f + jitterX, (float)y + 0.5f + jitterY, (float)z + 0.5f + jitterZ, sx, sy);
+                cam.project((float)x + 0.5f + warpX, (float)y + 0.5f + warpY, (float)z + 0.5f + warpZ, sx, sy);
 
                 // 屏幕投影剔除
-                if (sx < -15 || sx > SCREEN_W + 15 || sy < -15 || sy > SKY_AREA_H + 15) continue;
+                if (sx < -20 || sx > SCREEN_W + 20 || sy < -20 || sy > SKY_AREA_H + 20) continue;
 
                 const AirCell& cell = sim.getCell(x, y, z);
-                // 云粒子投影半径，使用静态噪声避免抖动
-                float baseRadius = cam.scale * (0.35f + d * 0.85f);
-                float radiusNoise = sim.getNoiseVal((x+7)%AtmosphereSimulation::X_SIZE, (y+3)%AtmosphereSimulation::Y_SIZE, (z+5)%AtmosphereSimulation::Z_SIZE);
-                float radiusVariation = 0.25f * (radiusNoise * 2.0f - 1.0f);
-                float r = baseRadius * (1.0f + radiusVariation);
-                if (r < 1.5f) r = 1.5f;
+
+                // 2. 大半径无缝重叠融合 (Metaball Blending)
+                // 半径从原本微小的 3~5 像素大幅扩展至 7.5~12 像素，相邻粒子大面积重叠，彻底消除网格空隙
+                float baseRadius = cam.scale * (0.95f + d * 1.45f);
+                float radiusNoise = sim.getNoiseVal((x + 7) % AtmosphereSimulation::X_SIZE, (y + 3) % AtmosphereSimulation::Y_SIZE, (z + 5) % AtmosphereSimulation::Z_SIZE);
+                float r = baseRadius * (0.88f + 0.24f * radiusNoise);
+                if (r < 3.5f) r = 3.5f;
 
                 // 光照强度计算与色彩插值
                 float li = cell.lightIntensity;
@@ -384,7 +387,7 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 cb = fminf(255, cb + zRatio * 8);
                 uint16_t bodyColor = RGB565(cr, cg, cb);
 
-                // 偏心三圆模拟 3D 漫反射软阴影与银边
+                // 偏心光影与向光银边
                 float offsetDist = r * 0.28f;
                 int ox_light = (int)roundf((float)sx + offsetDist * 0.8f);
                 int oy_light = (int)roundf((float)sy - offsetDist * 0.8f);
@@ -413,7 +416,6 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                             rimColor = RGB565(255, 255, 255);
                             shadowColor = colorInterpolate(shadowColor, _lightningColor, 0.6f);
                         } else {
-                            // 中等距离：与闪电底色自然光影混合
                             bodyColor = colorInterpolate(bodyColor, _lightningColor, lightSpread);
                             rimColor = colorInterpolate(rimColor, _lightningColor, lightSpread);
                             shadowColor = colorInterpolate(shadowColor, _lightningColor, lightSpread * 0.5f);
@@ -421,14 +423,25 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                     }
                 }
 
+                // 3. 不规则伴生副云絮羽化 (打破完美正圆几何感)
+                if (d > 0.55f) {
+                    float puffAngle = noiseValX * 3.14159f;
+                    float puffDist = r * 0.52f;
+                    int px = (int)roundf((float)sx + cosf(puffAngle) * puffDist);
+                    int py = (int)roundf((float)sy + sinf(puffAngle) * puffDist);
+                    float pr = r * 0.68f;
+                    _canvas->fillCircle(px, py, pr + 0.8f, shadowColor);
+                    _canvas->fillCircle(px, py, pr, bodyColor);
+                }
+
                 // ── 步骤一：底层阴影基底 (Shadow) ──
-                _canvas->fillCircle(ox_dark, oy_dark, r + 0.8f, shadowColor);
+                _canvas->fillCircle(ox_dark, oy_dark, r + 1.2f, shadowColor);
 
                 // ── 步骤二：中层体积核心圆 (Body Color) ──
                 _canvas->fillCircle(sx, sy, r, bodyColor);
 
                 // ── 步骤三：向光高光与透光银边圆 (Specular Rim & Mie Scattering) ──
-                _canvas->fillCircle(ox_light, oy_light, r * 0.65f, rimColor);
+                _canvas->fillCircle(ox_light, oy_light, r * 0.68f, rimColor);
 
                 --drawBudget; // 消耗帧预算
             }
