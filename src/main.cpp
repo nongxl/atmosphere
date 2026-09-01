@@ -124,7 +124,8 @@ void loop() {
             
             float gravLen = sqrtf(ax * ax + ay * ay + az * az);
             if (gravLen > 0.1f) {
-                // 恢复正确方向：M5StickS3 竖直手持时 ax ≈ -1.0G，重力矢量应该直接取 ax 从而获得 gravZ = -1.0 (向下)
+                // 恢复：由于上一版修复浮力与视野压缩后，原有的 IMU 重力映射其实是正确的。
+                // 之前的颠倒是因为强烈的重力拖拽导致云堆积在 z=0 并且相机没填满屏幕产生的错觉。
                 camera->gravX = ay / gravLen;
                 camera->gravY = az / gravLen;
                 camera->gravZ = ax / gravLen;
