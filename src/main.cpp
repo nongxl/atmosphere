@@ -116,11 +116,11 @@ void loop() {
 
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
-            // 竖屏（Rotation 0，135x240）物理轴直接映射：
-            // ax 对应屏幕左右侧倾 (Roll)
-            // ay 对应屏幕前后俯仰 (Pitch)，补偿正常手持倾角基准偏置 ~0.55G
-            float rawRoll = ax;
-            float rawPitch = ay + 0.55f;
+            // 竖屏（Rotation 0，135x240）物理轴映射（对调轴向）：
+            // ay 对应屏幕左右侧倾 (Roll)
+            // ax 对应屏幕前后俯仰 (Pitch)，补偿正常手持倾角基准偏置 ~0.55G
+            float rawRoll = ay;
+            float rawPitch = ax + 0.55f;
 
             // EMA 低通滤波（平滑视差运动）
             const float IMU_LPF_ALPHA = 0.85f;
