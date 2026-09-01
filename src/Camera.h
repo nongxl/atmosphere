@@ -56,9 +56,9 @@ public:
         float z1 = dz;
 
         // 3. 绕相机水平横轴 X 旋转 elevation (前后俯仰视角)
-        // Y_view 向上为正: 平视(E=0)时 Y_view = z1; 俯视(E>0)时看到近处 y1<0 偏下方，远处的 y1>0 偏上方
+        // Y_view 向上为正: 平视(E=0)时 Y_view = z1; 俯视(E>0)时远端 y1>0 向上、近端 y1<0 向下展现云顶
         float xView = x1;
-        float yView = z1 * _cachedCosE - y1 * _cachedSinE;
+        float yView = z1 * _cachedCosE + y1 * _cachedSinE;
 
         // 4. 投影至 2D 屏幕 (屏幕 Y 向下为正，因此减去 yView * scale)
         screenX = (int)roundf(centerX + xView * scale);
