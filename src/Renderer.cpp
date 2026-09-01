@@ -64,17 +64,17 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, const Camera& ca
     for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
         for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
             int lowestDarkBaseZ = -1;
-            for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
+            for (int z = 2; z < AtmosphereSimulation::Z_SIZE; z++) {
                 const AirCell& cell = sim.getCell(x, y, z);
-                // 寻找最底层的致密深色乌云区 (cloudDensity > 0.40 && lightIntensity < 0.45)
-                if (cell.cloudDensity > 0.40f && cell.lightIntensity < 0.45f) {
+                // 寻找最底层的致密深色乌云区 (cloudDensity > 0.35 && lightIntensity < 0.50)
+                if (cell.cloudDensity > 0.35f && cell.lightIntensity < 0.50f) {
                     lowestDarkBaseZ = z;
                     break; // 找到当前空气柱的最下端乌云底，立刻跳出，绝不向上寻找！
                 }
             }
 
             // 只有当前空气柱确实存在乌云底部，且下方空气层开阔，才从最下端乌云底面渗出降水
-            if (lowestDarkBaseZ >= 1 && (random(1000) < 28)) {
+            if (lowestDarkBaseZ >= 2 && (random(1000) < 36)) {
                 for (int i = 0; i < MAX_RAIN_DROPS; i++) {
                     if (!_drops[i].active) {
                         _drops[i].active = true;
@@ -90,11 +90,11 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, const Camera& ca
                         
                         _drops[i].x = (float)x + 0.5f + warpX + (random(100) - 50) * 0.004f;
                         _drops[i].y = (float)y + 0.5f + warpY + (random(100) - 50) * 0.004f;
-                        _drops[i].z = (float)lowestDarkBaseZ + 0.5f + warpZ - 0.45f; // 严格在最低乌云底正下方
+                        _drops[i].z = (float)lowestDarkBaseZ + 0.5f + warpZ - 0.35f; // 严格在最低乌云底正下方
                         
                         const AirCell& baseCell = sim.getCell(x, y, lowestDarkBaseZ);
                         // 雨滴初速度沿重力方向（IMU 驱动）+ 微弱风场随动
-                        float rainSpeed = 5.5f + (random(100) / 25.0f);
+                        float rainSpeed = 6.0f + (random(100) / 25.0f);
                         _drops[i].vx = baseCell.velocityX * 0.35f + gx * rainSpeed;
                         _drops[i].vy = baseCell.velocityY * 0.35f + gy * rainSpeed;
                         _drops[i].vz = baseCell.velocityZ * 0.10f + gz * rainSpeed;

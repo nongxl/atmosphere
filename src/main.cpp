@@ -124,21 +124,24 @@ void loop() {
             
             float gravLen = sqrtf(ax * ax + ay * ay + az * az);
             if (gravLen > 0.1f) {
-                // M5StickS3 IMU 方向修正：横向 ay 取反，纵向 ax 保持正向
-                camera->gravX = -ay / gravLen;
+                // 硬件引脚物理轴向映射：
+                // ax: 设备短边（左右横向，向右倾斜 ax > 0） -> gravX
+                // ay: 设备长边（上下纵向，正立手持 ay < 0） -> gravZ
+                // az: 屏幕法向（前后俯仰，屏幕朝上 az > 0） -> gravY
+                camera->gravX = ax / gravLen;
                 camera->gravY = -az / gravLen;
-                camera->gravZ = ax / gravLen;
+                camera->gravZ = ay / gravLen;
                 sim->setGravity(camera->gravX, camera->gravY, camera->gravZ);
             }
 
-            // 1. 左右转动 (Roll / Azimuth) 严格由短轴 ay 驱动
-            float rawRoll = ay;
+            // 1. 左右侧倾 (Roll) 由横轴 ax 驱动
+            float rawRoll = ax;
 
-            // 2. 前后俯仰 (Pitch / Elevation) 采用 atan2(az, -ax) 严格几何解算
-            // 平视(ax≈-1.0, az≈0) -> 0 弧度 (正平视)
+            // 2. 前后俯仰 (Pitch) 由法向 az 与纵向 ay 解算
+            // 正立手持(ay≈-1.0, az≈0) -> 0 弧度 (平视)
             // 前倾看顶(屏幕朝上 az>0) -> 正弧度 (俯视看云顶)
             // 后仰看底(屏幕朝下 az<0) -> 负弧度 (仰视看云底)
-            float rawPitch = atan2f(az, -ax);
+            float rawPitch = atan2f(az, -ay);
 
             // EMA 低通滤波（平滑旋转视角）
             const float LPF = 0.82f;
@@ -150,9 +153,7 @@ void loop() {
             float effRoll = fabsf(filtRoll) > DEADZONE ? (filtRoll > 0 ? filtRoll - DEADZONE : filtRoll + DEADZONE) : 0.0f;
             float effPitch = fabsf(filtPitch) > DEADZONE ? (filtPitch > 0 ? filtPitch - DEADZONE : filtPitch + DEADZONE) : 0.0f;
 
-            // 3D 轨道球视角赋值 (前后与左右 100% 正交解耦，互不干扰)
-            // 左右转动设备 -> 观察云的左侧与右侧 (Azimuth 范围 ±1.4 弧度 ≈ ±80°)
-            // 前后转动设备 -> 观察云的顶部与底部 (Elevation：平放看顶 elevation>0，后仰看底 elevation<0)
+            // 3D 轨道球视角赋值
             camera->azimuth = clampF(-effRoll * 1.6f, -1.4f, 1.4f);
             camera->elevation = clampF(effPitch * 1.1f, -1.2f, 1.2f);
 
