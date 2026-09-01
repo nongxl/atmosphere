@@ -254,14 +254,14 @@ void Renderer::draw(AtmosphereSimulation& sim, const Camera& cam, float extTemp,
             _epicenterZ3D = 7.0f + (float)random(3);
         }
 
-        // 投影得到屏幕 2D 起始点
+        // 投影得到屏幕 2D 起始点（闪电起始震源真实位于 3D 云层内部）
         cam.project(_epicenterX3D + 0.5f, _epicenterY3D + 0.5f, _epicenterZ3D + 0.5f, _lightningX, _lightningY);
         
         // 强制夹紧防止折线出界
         if (_lightningX < 5) _lightningX = 5;
         if (_lightningX > SCREEN_W - 5) _lightningX = SCREEN_W - 5;
         if (_lightningY < 5) _lightningY = 5;
-        if (_lightningY > SKY_AREA_H / 2) _lightningY = SKY_AREA_H / 2;
+        if (_lightningY > SKY_AREA_H - 10) _lightningY = SKY_AREA_H - 10;
 
         // 配置闪电类型与发光参数
         _lightningType = random(3); // 0=云内闪电, 1=云际闪电, 2=闪地闪电

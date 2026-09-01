@@ -530,21 +530,21 @@ void AtmosphereSimulation::injectCyclone() {
                     float factor = (6.0f - dist) / 6.0f;
                     AirCell& cell = getCellRef(x, y, z);
 
-                    if (z <= 3) {
-                        // 低层：注入强烈暖湿气流，触发强对流
-                        cell.temperature = fmaxf(cell.temperature, 40.0f * factor + 28.0f * (1.0f - factor));
-                        cell.vapor       = fminf(1.0f, cell.vapor + 0.90f * factor);
-                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.40f * factor);
-                    } else if (z <= 7) {
-                        // 中层：主对流云柱，深沉厚重
-                        cell.temperature = fmaxf(cell.temperature, 25.0f * factor + 15.0f * (1.0f - factor));
-                        cell.vapor       = fminf(1.0f, cell.vapor + 0.85f * factor);
-                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.55f * factor);
+                    if (z <= 2) {
+                        // 地表/近地面层 (z=0..2)：强热源与水汽蒸发上升区（不凝结成低空贴地厚云，留出暴雨下落空间）
+                        cell.temperature = fmaxf(cell.temperature, 38.0f * factor + 26.0f * (1.0f - factor));
+                        cell.vapor       = fminf(1.0f, cell.vapor + 0.95f * factor);
+                        cell.cloudDensity = fminf(cell.cloudDensity, 0.15f); // 底层不聚云
+                    } else if (z <= 6) {
+                        // 对流云底与中层 (z=3..6)：水汽抬升剧烈凝结，形成厚重、深暗的雷暴乌云底
+                        cell.temperature = fmaxf(cell.temperature, 26.0f * factor + 16.0f * (1.0f - factor));
+                        cell.vapor       = fminf(1.0f, cell.vapor + 0.88f * factor);
+                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.70f * factor);
                     } else {
-                        // 高层(z=8~11)：冰晶凝结层，构造宽阔耀眼的砧状纯白云砧 (Anvil Top)
+                        // 高层云砧 (z=7..11)：高空强对流向外扩散，构造宽阔耀眼的砧状纯白云砧 (Anvil Top)
                         cell.vapor = fminf(1.0f, cell.vapor + 0.80f * factor);
-                        cell.temperature = fminf(cell.temperature, 2.0f - (float)(z - 7) * 4.0f); // 极寒高空冰晶
-                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.65f * factor);
+                        cell.temperature = fminf(cell.temperature, 0.0f - (float)(z - 6) * 3.5f); // 极寒高空冰晶
+                        cell.cloudDensity = fminf(1.0f, cell.cloudDensity + 0.85f * factor);
                     }
 
                     // 贯通全高度的强劲上升气流（水汽直冲对流层天顶）
