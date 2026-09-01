@@ -16,9 +16,9 @@ struct AirCell {
 
 class AtmosphereSimulation {
 public:
-    static constexpr int X_SIZE = 16;
-    static constexpr int Y_SIZE = 16;
-    static constexpr int Z_SIZE = 12;
+    static constexpr int X_SIZE = 14;
+    static constexpr int Y_SIZE = 14;
+    static constexpr int Z_SIZE = 10;
 
     AtmosphereSimulation();
     ~AtmosphereSimulation();
@@ -50,10 +50,21 @@ public:
         return _noiseTable[z * X_SIZE * Y_SIZE + y * X_SIZE + x];
     }
 
+    // 动态重力矢量 (gx, gy, gz)，默认竖直向下 (0, 0, -1.0)
+    void setGravityVector(float gx, float gy, float gz);
+    inline void getGravityVector(float& gx, float& gy, float& gz) const {
+        gx = _gravityX; gy = _gravityY; gz = _gravityZ;
+    }
+
 private:
     AirCell* _cells;
     AirCell* _nextCells;
     float*   _noiseTable;
+
+    // 动态重力与浮力场参数
+    float _gravityX;
+    float _gravityY;
+    float _gravityZ;
 
     // 闪电系统状态
     float _electricCharge;   // 当前电荷（超过阈值则触发闪电）

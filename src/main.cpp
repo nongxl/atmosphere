@@ -147,6 +147,9 @@ void loop() {
             camera->azimuth = clampF(-effRoll * 1.6f, -1.4f, 1.4f);
             camera->elevation = clampF(effPitch * 1.1f, -1.2f, 1.2f);
 
+            // 实时同步物理世界重力矢量驱动云体浮力与倾斜降雨 (ax:长轴, ay:短轴, az:法向)
+            sim->setGravityVector(ay, 0.0f, ax);
+
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
                 lastPrintMs = millis();
