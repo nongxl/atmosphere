@@ -108,41 +108,49 @@ void loop() {
     if (dt < 0.001f) dt = 0.001f;
     if (dt > 0.05f)  dt = 0.05f;
 
-    // 2.5 IMU 3D 轨道球相机视角控制（纯旋转观察：平视侧面、前俯看顶、后仰看底、左右看侧）
+    // 2.5 IMU 3D 轨道球相机姿态解算（严格正交解耦：平视侧面、前俯看顶、后仰看底、左右看侧）
     {
         M5.Imu.update();
 
-        static float imuRoll = 0.0f;
-        static float imuPitch = 0.0f;
+        static float filtRoll = 0.0f;
+        static float filtPitch = 0.0f;
 
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
         if (M5.Imu.getAccel(&ax, &ay, &az)) {
-            // 竖屏（Rotation 0，135x240）：
-            // ax 对应屏幕短轴横向分量，严格驱动左右转动 (Azimuth 观察左右侧面)
-            // az 对应屏幕法向分量，严格驱动前后俯仰 (Elevation：前倾看顶 az>0，后仰看底 az<0)
-            float rawRoll = ax;
-            float rawPitch = az;
+            // M5StickS3 竖屏（Rotation 0，135x240）物理芯片引脚：
+            // ax: 沿设备长边 (竖直手持平视时 ax ≈ -1.0G)
+            // ay: 沿设备短边 (左右侧倾分量)
+            // az: 垂直屏幕法向 (前后俯仰分量)
+
+            // 1. 左右转动 (Roll / Azimuth) 严格由短轴 ay 驱动
+            float rawRoll = ay;
+
+            // 2. 前后俯仰 (Pitch / Elevation) 采用 atan2(az, -ax) 严格几何解算
+            // 平视(ax≈-1.0, az≈0) -> 0 弧度 (正平视)
+            // 前倾看顶(屏幕朝上 az>0) -> 正弧度 (俯视看云顶)
+            // 后仰看底(屏幕朝下 az<0) -> 负弧度 (仰视看云底)
+            float rawPitch = atan2f(az, -ax);
 
             // EMA 低通滤波（平滑旋转视角）
-            const float IMU_LPF_ALPHA = 0.85f;
-            imuRoll = imuRoll * IMU_LPF_ALPHA + rawRoll * (1.0f - IMU_LPF_ALPHA);
-            imuPitch = imuPitch * IMU_LPF_ALPHA + rawPitch * (1.0f - IMU_LPF_ALPHA);
+            const float LPF = 0.82f;
+            filtRoll = filtRoll * LPF + rawRoll * (1.0f - LPF);
+            filtPitch = filtPitch * LPF + rawPitch * (1.0f - LPF);
 
             // 平滑死区
-            const float DEADZONE = 0.03f;
-            float effRoll = fabsf(imuRoll) > DEADZONE ? (imuRoll > 0 ? imuRoll - DEADZONE : imuRoll + DEADZONE) : 0.0f;
-            float effPitch = fabsf(imuPitch) > DEADZONE ? (imuPitch > 0 ? imuPitch - DEADZONE : imuPitch + DEADZONE) : 0.0f;
+            const float DEADZONE = 0.04f;
+            float effRoll = fabsf(filtRoll) > DEADZONE ? (filtRoll > 0 ? filtRoll - DEADZONE : filtRoll + DEADZONE) : 0.0f;
+            float effPitch = fabsf(filtPitch) > DEADZONE ? (filtPitch > 0 ? filtPitch - DEADZONE : filtPitch + DEADZONE) : 0.0f;
 
-            // 映射至 3D 轨道球视角（无平移）：
+            // 3D 轨道球视角赋值 (前后与左右 100% 正交解耦，互不干扰)
             // 左右转动设备 -> 观察云的左侧与右侧 (Azimuth 范围 ±1.4 弧度 ≈ ±80°)
             // 前后转动设备 -> 观察云的顶部与底部 (Elevation 范围 ±1.1 弧度 ≈ ±63°)
-            camera->azimuth = clampF(-effRoll * 1.5f, -1.4f, 1.4f);
-            camera->elevation = clampF(effPitch * 1.3f, -1.1f, 1.1f);
+            camera->azimuth = clampF(-effRoll * 1.6f, -1.4f, 1.4f);
+            camera->elevation = clampF(effPitch * 1.1f, -1.1f, 1.1f);
 
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
                 lastPrintMs = millis();
-                Serial.printf("[IMU] Accel: %.2f,%.2f,%.2f | Azimuth(Yaw): %.2f | Elevation(Pitch): %.2f\n",
+                Serial.printf("[IMU] Accel: ax=%.2f, ay=%.2f, az=%.2f | Azimuth(Yaw)=%.2f | Elevation(Pitch)=%.2f\n",
                               ax, ay, az, camera->azimuth, camera->elevation);
             }
         }
