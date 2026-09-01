@@ -168,7 +168,7 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, const Camera& ca
                 _windParticles[i].active = true;
                 _windParticles[i].x = (float)random(AtmosphereSimulation::X_SIZE);
                 _windParticles[i].y = (float)random(AtmosphereSimulation::Y_SIZE);
-                _windParticles[i].z = (float)random(AtmosphereSimulation::Z_SIZE);
+                _windParticles[i].z = (float)(random(1000)) / 1000.0f * AtmosphereSimulation::Z_SIZE; // 全高度随机分布风线
                 _windParticles[i].life = 0.0f;
                 _windParticles[i].maxLife = 6.0f + (random(1000) / 1000.0f) * 8.0f;
                 _windParticles[i].alpha = 0.0f;
