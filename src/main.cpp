@@ -124,10 +124,9 @@ void loop() {
             
             float gravLen = sqrtf(ax * ax + ay * ay + az * az);
             if (gravLen > 0.1f) {
-                // 恢复：由于上一版修复浮力与视野压缩后，原有的 IMU 重力映射其实是正确的。
-                // 之前的颠倒是因为强烈的重力拖拽导致云堆积在 z=0 并且相机没填满屏幕产生的错觉。
-                camera->gravX = ay / gravLen;
-                camera->gravY = az / gravLen;
+                // M5StickS3 IMU 方向修正：横向 ay 取反，纵向 ax 保持正向
+                camera->gravX = -ay / gravLen;
+                camera->gravY = -az / gravLen;
                 camera->gravZ = ax / gravLen;
                 sim->setGravity(camera->gravX, camera->gravY, camera->gravZ);
             }

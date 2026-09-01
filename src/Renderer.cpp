@@ -421,10 +421,11 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 float li = cell.lightIntensity;
                 float zRatio = (float)z / (AtmosphereSimulation::Z_SIZE - 1); // 0.0(底) ~ 1.0(顶)
                 
-                // 顶部白云顶 (zRatio接近1) 拥有极高亮白度；底部乌云底 (zRatio接近0) 呈现深沉雷暴黑灰色
-                uint8_t r_dark = (uint8_t)(45 + zRatio * 150);
-                uint8_t g_dark = (uint8_t)(48 + zRatio * 150);
-                uint8_t b_dark = (uint8_t)(62 + zRatio * 140);
+                // 顶部白云顶拥有极高亮白度；底部乌云底被自身遮蔽 (lightIntensity极低)，呈现深沉雷暴黑灰色
+                // 完全解绑云的物理高度 (zRatio)，只依据光照遮蔽 (li) 来渲染厚重感，这样云飘到哪里都物理真实
+                uint8_t r_dark = (uint8_t)(45 + li * 150);
+                uint8_t g_dark = (uint8_t)(48 + li * 150);
+                uint8_t b_dark = (uint8_t)(62 + li * 140);
                 
                 uint8_t r_light = 248;
                 uint8_t g_light = 248;
