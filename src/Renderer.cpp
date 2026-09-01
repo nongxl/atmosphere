@@ -55,29 +55,52 @@ void Renderer::init(M5Canvas* canvas) {
 }
 
 void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
-    // 1. 智能雨滴生成：沿垂直空气柱自底向上寻找真实存在的致密云底 (Lowest Cloud Base)
-    for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
-        for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
-            int cloudBaseZ = -1;
-            for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
-                if (sim.getCell(x, y, z).cloudDensity > 0.40f) {
-                    cloudBaseZ = z;
-                    break;
-                }
-            }
-
-            // 只有当前空气柱上方确实存在云层，才从云底正下方生成降雨
-            if (cloudBaseZ >= 1 && (random(1000) < 25)) {
-                for (int i = 0; i < MAX_RAIN_DROPS; i++) {
-                    if (!_drops[i].active) {
-                        _drops[i].active = true;
-                        _drops[i].x = (float)x + (random(100) / 100.0f);
-                        _drops[i].y = (float)y + (random(100) / 100.0f);
-                        _drops[i].z = (float)cloudBaseZ - 0.25f; // 严格从最低云底下方生成
-                        _drops[i].vx = sim.getCell(x, y, cloudBaseZ).velocityX * 0.4f;
-                        _drops[i].vy = sim.getCell(x, y, cloudBaseZ).velocityY * 0.4f;
-                        _drops[i].vz = -5.5f - (random(100) / 25.0f); // 强劲向下垂直初速度
-                        break;
+    // 1. 真实物理微物理降雨自然生成 (Kessler Autoconversion & Rain Shedding)
+    // 降水纯粹由云层物理性质自然涌现：
+    // ① 密度达到致密降水阈值 (cloudDensity > 0.42f)
+    // ② 处于深色乌云区域 (lightIntensity < 0.42f，被上方厚云自阴影遮蔽的乌云区，绝非向光白云顶)
+    // ③ 处于乌云下界面 (下方云密度显著变薄，雨滴自然脱离云底渗出)
+    for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
+        for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
+            for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
+                const AirCell& cell = sim.getCell(x, y, z);
+                
+                // 必须是足够致密的深色乌云区 (雨和雷电在乌云处自然发生)
+                if (cell.cloudDensity > 0.42f && cell.lightIntensity < 0.42f) {
+                    // 检测是否处于乌云的下边缘 (下方密度变薄或者下方空间开阔)
+                    const AirCell& belowCell = sim.getCell(x, y, z - 1);
+                    bool isSheddingBoundary = (belowCell.cloudDensity < cell.cloudDensity * 0.80f) || (belowCell.cloudDensity < 0.35f);
+                    
+                    if (isSheddingBoundary) {
+                        // 动态降雨几率与乌云厚度与密度正相关
+                        float rainChance = (cell.cloudDensity - 0.40f) * 60.0f; // 自然概率
+                        if (random(1000) < (int)rainChance) {
+                            for (int i = 0; i < MAX_RAIN_DROPS; i++) {
+                                if (!_drops[i].active) {
+                                    _drops[i].active = true;
+                                    
+                                    // 获取该处云体扭曲后的真实连续空间位置
+                                    float noiseValX = sim.getNoiseVal(x, y, z) * 2.0f - 1.0f;
+                                    float noiseValY = sim.getNoiseVal((x + 6) % AtmosphereSimulation::X_SIZE, (y + 9) % AtmosphereSimulation::Y_SIZE, z) * 2.0f - 1.0f;
+                                    float noiseValZ = sim.getNoiseVal((x + 3) % AtmosphereSimulation::X_SIZE, y, (z + 4) % AtmosphereSimulation::Z_SIZE) * 2.0f - 1.0f;
+                                    
+                                    float warpX = noiseValX * (0.75f + (1.0f - cell.cloudDensity) * 0.35f);
+                                    float warpY = noiseValY * (0.75f + (1.0f - cell.cloudDensity) * 0.35f);
+                                    float warpZ = noiseValZ * 0.70f;
+                                    
+                                    // 严格从该乌云体素的下表面边界孵化
+                                    _drops[i].x = (float)x + 0.5f + warpX + (random(100) - 50) * 0.004f;
+                                    _drops[i].y = (float)y + 0.5f + warpY + (random(100) - 50) * 0.004f;
+                                    _drops[i].z = (float)z + 0.5f + warpZ - 0.45f; // 下表面界面
+                                    
+                                    // 继承局部风场水平速度，并赋予强劲垂直重力降水速度
+                                    _drops[i].vx = cell.velocityX * 0.4f;
+                                    _drops[i].vy = cell.velocityY * 0.4f;
+                                    _drops[i].vz = -5.5f - (random(100) / 25.0f);
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
