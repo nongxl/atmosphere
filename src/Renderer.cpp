@@ -55,31 +55,29 @@ void Renderer::init(M5Canvas* canvas) {
 }
 
 void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
-    // 1. 生成雨滴（只从云底生成）
-    for (int z = 1; z < AtmosphereSimulation::Z_SIZE; z++) {
+    // 1. 生成雨滴（严格限制在低空乌云底 z: 1 ~ 5 生成并向地面降落）
+    for (int z = 1; z <= 5; z++) {
         for (int y = 0; y < AtmosphereSimulation::Y_SIZE; y++) {
             for (int x = 0; x < AtmosphereSimulation::X_SIZE; x++) {
                 const AirCell& cell = sim.getCell(x, y, z);
                 
-                // 只有当当前格子有云，且下方格子没有云（云底）时才生成雨滴
-                bool isCloudBottom = false;
-                if (z > 0) {
+                // 只有当当前乌云层致密，且下方空间开阔时才生成雨滴
+                bool isCloudBottom = (cell.cloudDensity > 0.45f);
+                if (z > 1) {
                     const AirCell& belowCell = sim.getCell(x, y, z - 1);
-                    isCloudBottom = (cell.cloudDensity > 0.5f) && (belowCell.cloudDensity < 0.3f);
-                } else {
-                    isCloudBottom = cell.cloudDensity > 0.5f;
+                    isCloudBottom = isCloudBottom && (belowCell.cloudDensity < 0.40f);
                 }
                 
-                if (isCloudBottom && (random(1000) < 15)) {
+                if (isCloudBottom && (random(1000) < 22)) {
                     for (int i = 0; i < MAX_RAIN_DROPS; i++) {
                         if (!_drops[i].active) {
                             _drops[i].active = true;
                             _drops[i].x = (float)x + (random(100) / 100.0f);
                             _drops[i].y = (float)y + (random(100) / 100.0f);
-                            _drops[i].z = (float)z - 0.3f; // 从云底略下方生成
-                            _drops[i].vx = cell.velocityX;
-                            _drops[i].vy = cell.velocityY;
-                            _drops[i].vz = -3.5f - (random(100) / 50.0f);
+                            _drops[i].z = (float)z - 0.2f; // 从乌云底略下方生成
+                            _drops[i].vx = cell.velocityX * 0.5f;
+                            _drops[i].vy = cell.velocityY * 0.5f;
+                            _drops[i].vz = -5.5f - (random(100) / 25.0f); // 强劲向下垂直雨速
                             break;
                         }
                     }
@@ -96,7 +94,7 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
         _drops[i].x += _drops[i].vx * dt;
         _drops[i].y += _drops[i].vy * dt;
         _drops[i].z += _drops[i].vz * dt;
-        _drops[i].vz -= 9.8f * dt; // 重力加速度
+        _drops[i].vz -= 12.0f * dt; // 真实重力加速度
 
         // 获取所在网格的风速并稍加影响
         int gx = (int)_drops[i].x;
@@ -106,8 +104,8 @@ void Renderer::updateParticles(const AtmosphereSimulation& sim, float dt) {
             gy >= 0 && gy < AtmosphereSimulation::Y_SIZE &&
             gz >= 0 && gz < AtmosphereSimulation::Z_SIZE) {
             const AirCell& c = sim.getCell(gx, gy, gz);
-            _drops[i].vx = _drops[i].vx * 0.9f + c.velocityX * 0.1f;
-            _drops[i].vy = _drops[i].vy * 0.9f + c.velocityY * 0.1f;
+            _drops[i].vx = _drops[i].vx * 0.92f + c.velocityX * 0.08f;
+            _drops[i].vy = _drops[i].vy * 0.92f + c.velocityY * 0.08f;
         }
 
         // 超界或掉落到地面 (z <= 0) 时回收
@@ -396,18 +394,23 @@ void Renderer::drawClouds(const AtmosphereSimulation& sim, const Camera& cam, fl
                 float r = baseRadius * (0.90f + 0.20f * radiusNoise);
                 if (r < 3.0f) r = 3.0f;
 
-                // 光照强度计算与色彩插值
+                // 光照强度计算与色彩物理分层
                 float li = cell.lightIntensity;
-                uint8_t r_light = 242, g_light = 242, b_light = 248;
-                uint8_t r_dark = 58, g_dark = 62, b_dark = 82;
-                uint8_t cr = (uint8_t)(r_dark + (r_light - r_dark) * li);
-                uint8_t cg = (uint8_t)(g_dark + (g_light - g_dark) * li);
-                uint8_t cb = (uint8_t)(b_dark + (b_light - b_dark) * li);
+                float zRatio = (float)z / (AtmosphereSimulation::Z_SIZE - 1); // 0.0(底) ~ 1.0(顶)
                 
-                float zRatio = (float)z / (AtmosphereSimulation::Z_SIZE - 1);
-                cr = fminf(255, cr + zRatio * 12);
-                cg = fminf(255, cg + zRatio * 12);
-                cb = fminf(255, cb + zRatio * 8);
+                // 顶部白云顶 (zRatio接近1) 拥有极高亮白度；底部乌云底 (zRatio接近0) 呈现深沉雷暴黑灰色
+                uint8_t r_dark = (uint8_t)(45 + zRatio * 150);
+                uint8_t g_dark = (uint8_t)(48 + zRatio * 150);
+                uint8_t b_dark = (uint8_t)(62 + zRatio * 140);
+                
+                uint8_t r_light = 248;
+                uint8_t g_light = 248;
+                uint8_t b_light = 255;
+                
+                float lightWeight = li * (0.35f + 0.65f * zRatio);
+                uint8_t cr = (uint8_t)fminf(255.0f, r_dark + (r_light - r_dark) * lightWeight);
+                uint8_t cg = (uint8_t)fminf(255.0f, g_dark + (g_light - g_dark) * lightWeight);
+                uint8_t cb = (uint8_t)fminf(255.0f, b_dark + (b_light - b_dark) * lightWeight);
                 uint16_t bodyColor = RGB565(cr, cg, cb);
 
                 // 偏心柔和阴影偏移
