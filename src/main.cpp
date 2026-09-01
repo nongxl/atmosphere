@@ -124,10 +124,10 @@ void loop() {
             
             float gravLen = sqrtf(ax * ax + ay * ay + az * az);
             if (gravLen > 0.1f) {
-                // M5StickS3 IMU 方向修正：物理重力向下时，确保 gravZ 为负（指向地表）
-                camera->gravX = -ay / gravLen;
-                camera->gravY = -az / gravLen;
-                camera->gravZ = -ax / gravLen;
+                // 恢复正确方向：M5StickS3 竖直手持时 ax ≈ -1.0G，重力矢量应该直接取 ax 从而获得 gravZ = -1.0 (向下)
+                camera->gravX = ay / gravLen;
+                camera->gravY = az / gravLen;
+                camera->gravZ = ax / gravLen;
                 sim->setGravity(camera->gravX, camera->gravY, camera->gravZ);
             }
 

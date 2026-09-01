@@ -171,20 +171,20 @@ void initMic() {
 }
 
 void updateMic() {
-    if (++_micFrame < 6) return;   // 每 6 帧采样一次（~200ms @30fps）
+    if (++_micFrame < 12) return;   // 每 12 帧采样一次（~400ms @30fps），减少采样频率
     _micFrame = 0;
 
-    static int16_t buf[64];
-    // blocking=true，64 采样 @8kHz ≈ 8ms
-    if (!M5.Mic.record(buf, 64, 8000, true)) return;
+    static int16_t buf[32];
+    // blocking=true，32 采样 @8kHz ≈ 4ms，减少采样量
+    if (!M5.Mic.record(buf, 32, 8000, true)) return;
 
     // RMS 计算
     int64_t sum = 0;
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < 32; i++) {
         int32_t s = buf[i];
         sum += (int64_t)s * s;
     }
-    float rms = sqrtf((float)(sum / 64));
+    float rms = sqrtf((float)(sum / 32));
 
     // dBFS：满量程 32767 → 90.3 dB；静音 → ~30 dB
     float db = (rms > 1.0f) ? 20.0f * log10f(rms) : 0.0f;
