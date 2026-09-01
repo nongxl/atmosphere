@@ -510,18 +510,18 @@ void Renderer::drawRain(const Camera& cam) {
         if (!_drops[i].active) continue;
 
         int sx1, sy1, sx2, sy2;
-        // 起点与终点（拉出一条短线段，体现下落动态风速效果）
+        // 起点与终点（适度短拖尾 0.022s，自然细腻下落雨丝）
         cam.project(_drops[i].x, _drops[i].y, _drops[i].z, sx1, sy1);
-        cam.project(_drops[i].x - _drops[i].vx * 0.05f, 
-                    _drops[i].y - _drops[i].vy * 0.05f, 
-                    _drops[i].z - _drops[i].vz * 0.05f, sx2, sy2);
+        cam.project(_drops[i].x - _drops[i].vx * 0.022f, 
+                    _drops[i].y - _drops[i].vy * 0.022f, 
+                    _drops[i].z - _drops[i].vz * 0.022f, sx2, sy2);
 
         // 仅在天空绘制区域内进行画线
         if (sy1 >= 0 && sy1 < SKY_AREA_H && sy2 >= 0 && sy2 < SKY_AREA_H &&
             sx1 >= 0 && sx1 < SCREEN_W && sx2 >= 0 && sx2 < SCREEN_W) {
             
-            // 雨滴颜色：冰蓝白色
-            _canvas->drawLine(sx1, sy1, sx2, sy2, RGB565(190, 215, 240));
+            // 雨滴颜色：半透明冰蓝白色
+            _canvas->drawLine(sx1, sy1, sx2, sy2, RGB565(175, 210, 245));
         }
     }
 }

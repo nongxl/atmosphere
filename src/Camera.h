@@ -12,13 +12,12 @@ public:
     float azimuth;    // 水平旋转角偏移 (弧度)，0 = 正中
     float elevation;  // 俯仰角偏移 (弧度)，0 = 默认 32° 俯视
 
-    // 默认观察视角基准角
-    static constexpr float BASE_AZIMUTH   = 0.785398f; // 45度 等轴基准方位角
-    static constexpr float BASE_ELEVATION = 0.650000f; // 37度 经典立体俯视仰角
+    // 默认观察方位角
+    static constexpr float BASE_AZIMUTH = 0.785398f; // 45度 等轴基准方位角
 
-    Camera(float cx = 67.5f, float cy = 102.0f, float s = 4.3f, float hs = 5.0f)
+    Camera(float cx = 67.5f, float cy = 100.0f, float s = 4.3f, float hs = 5.0f)
         : centerX(cx), centerY(cy), scale(s), heightScale(hs),
-          azimuth(0.0f), elevation(0.0f) {}
+          azimuth(0.0f), elevation(0.60f) {}
 
     // 将 3D 物理网格坐标 (x, y, z) 转换为 2D 屏幕坐标 (screenX, screenY)
     // 采用标准 3D 环绕相机模型 (Orbit Camera)：绕网格物理中心纯 3D 空间旋转
@@ -40,15 +39,16 @@ public:
         float y1 = dx * sinA + dy * cosA;
         float z1 = dz;
 
-        // 3. 第二步：绕水平轴旋转俯仰角 (Base + Elevation)
-        // 俯视观察模型：相机位于斜上方俯视
-        float totalElevation = BASE_ELEVATION + elevation;
-        if (totalElevation < 0.15f) totalElevation = 0.15f; // 防止平视翻转
-        if (totalElevation > 1.25f) totalElevation = 1.25f; // 防止垂直朝下
-        float cosE = cosf(totalElevation);
-        float sinE = sinf(totalElevation);
+        // 3. 第二步：绕水平轴旋转俯仰角 (elevation: 0.05 纯平视 -> 1.25 高空俯视)
+        float elev = elevation;
+        if (elev < 0.05f) elev = 0.05f; // 允许水平平视 (3°)
+        if (elev > 1.25f) elev = 1.25f; // 防止垂直朝下 (72°)
+        float cosE = cosf(elev);
+        float sinE = sinf(elev);
 
-        // 正统俯视投影：远方 (y1>0) 与 高空 (dz>0) 在屏幕上方 (-Y 方向)
+        // 正统 3D 观察投影：
+        // 平视时 (elev ≈ 0): sinE=0, cosE=1 -> projY = -dz (纯高度投影，与云水平平视！)
+        // 俯视时 (elev > 0): 远景 y1 向上展开，展现立体深度
         float projY = -(y1 * sinE + dz * cosE);
 
         // 4. 映射到屏幕中心
