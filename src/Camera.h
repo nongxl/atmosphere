@@ -8,45 +8,50 @@ public:
     float scale;
     float heightScale;
 
-    // IMU 驱动的全息视窗参数
-    float azimuth;    // 水平旋转角 (弧度)，0 = 默认等轴视角
-    float elevation;  // 仰角偏移 (弧度)，0 = 默认 30° 俯视
-    float panX;       // 水平视差平移量 (像素)
-    float panY;       // 垂直视差平移量 (像素)
+    // IMU 驱动的 3D 视角旋转参数
+    float azimuth;    // 水平旋转角偏移 (弧度)，0 = 正中
+    float elevation;  // 俯仰角偏移 (弧度)，0 = 默认 32° 俯视
 
-    mutable float _lastAzimuth = -999.0f;
-    mutable float _cachedCosA = 1.0f;
-    mutable float _cachedSinA = 0.0f;
+    // 默认观察视角基准角
+    static constexpr float BASE_AZIMUTH   = 0.785398f; // 45度 等轴基准方位角
+    static constexpr float BASE_ELEVATION = 0.558505f; // 32度 默认俯视仰角
 
     Camera(float cx = 67.5f, float cy = 90.0f, float s = 4.3f, float hs = 5.0f)
         : centerX(cx), centerY(cy), scale(s), heightScale(hs),
-          azimuth(0.0f), elevation(0.0f), panX(0.0f), panY(0.0f) {}
+          azimuth(0.0f), elevation(0.0f) {}
 
     // 将 3D 物理网格坐标 (x, y, z) 转换为 2D 屏幕坐标 (screenX, screenY)
-    // 全息视窗模型：结合 3D 旋转 + 深度透视 + 视差平移
+    // 采用标准 3D 环绕相机模型 (Orbit Camera)：绕网格物理中心纯 3D 空间旋转
     void project(float x, float y, float z, int& screenX, int& screenY) const {
         const float gridCenterX = 7.5f;
         const float gridCenterY = 7.5f;
+        const float gridCenterZ = 5.5f;
         
+        // 1. 相对中心相对坐标
         float dx = x - gridCenterX;
         float dy = y - gridCenterY;
+        float dz = (z - gridCenterZ) * 1.15f; // 纵向高度比例调节
 
-        // 绕网格中心连续平滑旋转 azimuth
-        if (azimuth != _lastAzimuth) {
-            _lastAzimuth = azimuth;
-            _cachedCosA = cosf(azimuth);
-            _cachedSinA = sinf(azimuth);
-        }
-        float rx = dx * _cachedCosA - dy * _cachedSinA + gridCenterX;
-        float ry = dx * _cachedSinA + dy * _cachedCosA + gridCenterY;
+        // 2. 第一步：绕垂直轴旋转方位角 (Base + Azimuth)
+        float totalAzimuth = BASE_AZIMUTH + azimuth;
+        float cosA = cosf(totalAzimuth);
+        float sinA = sinf(totalAzimuth);
+        float x1 = dx * cosA - dy * sinA;
+        float y1 = dx * sinA + dy * cosA;
+        float z1 = dz;
 
-        // 等轴仰角系数（基准 0.5，根据 elevation 平滑微调）
-        float elevFactor = 0.5f + elevation * 0.25f;
-        if (elevFactor < 0.20f) elevFactor = 0.20f;
-        if (elevFactor > 0.80f) elevFactor = 0.80f;
+        // 3. 第二步：绕水平轴旋转俯仰角 (Base + Elevation)
+        float totalElevation = BASE_ELEVATION + elevation;
+        if (totalElevation < 0.10f) totalElevation = 0.10f; // 防止完全平视翻转
+        if (totalElevation > 1.35f) totalElevation = 1.35f; // 防止超顶俯视
+        float cosE = cosf(totalElevation);
+        float sinE = sinf(totalElevation);
 
-        // 结合等轴测投影与 IMU 全息视差平移 (panX, panY)
-        screenX = (int)roundf(centerX + panX + (rx - ry) * 0.866025f * scale);
-        screenY = (int)roundf(centerY + panY + (rx + ry) * elevFactor * scale - z * heightScale);
+        float x2 = x1;
+        float y2 = y1 * sinE - z1 * cosE; // 屏幕垂直方向投影
+
+        // 4. 映射到屏幕中心
+        screenX = (int)roundf(centerX + x2 * 0.95f * scale);
+        screenY = (int)roundf(centerY + y2 * scale);
     }
 };

@@ -135,22 +135,20 @@ void loop() {
             float effectiveX = fabsf(imuX) > IMU_DEADZONE ? (imuX > 0 ? imuX - IMU_DEADZONE : imuX + IMU_DEADZONE) : 0.0f;
             float effectiveY = fabsf(imuY) > IMU_DEADZONE ? (imuY > 0 ? imuY - IMU_DEADZONE : imuY + IMU_DEADZONE) : 0.0f;
 
-            // 全息视窗映射（视差平移 + 微视角旋转）
-            const float MAX_PAN_X = 22.0f;      // 水平视差平移 ±22 像素
-            const float MAX_PAN_Y = 18.0f;      // 垂直视差平移 ±18 像素
-            const float MAX_AZIMUTH = 0.35f;    // 水平旋转角 ±20 度 (产生立体侧视)
-            const float MAX_ELEVATION = 0.30f;  // 仰角偏移 ±17 度 (产生俯视/侧视)
+            // 纯 3D 空间环绕视角映射（中心绝对固定，转动设备旋转 3D 观察视角）
+            // 左右侧倾控制水平方位角 (azimuth)，可大范围环视云团四周侧面
+            // 前后俯仰控制俯仰仰角 (elevation)，可从俯视云顶到平视云腰自由观察
+            const float MAX_AZIMUTH   = 1.15f; // 约 66 度水平环视范围
+            const float MAX_ELEVATION = 0.55f; // 约 32 度俯仰仰角范围
 
-            camera->panX = clampF(-effectiveX * MAX_PAN_X, -MAX_PAN_X, MAX_PAN_X);
-            camera->panY = clampF(effectiveY * MAX_PAN_Y, -MAX_PAN_Y, MAX_PAN_Y);
-            camera->azimuth = clampF(-effectiveX * MAX_AZIMUTH, -MAX_AZIMUTH, MAX_AZIMUTH);
+            camera->azimuth   = clampF(-effectiveX * MAX_AZIMUTH, -MAX_AZIMUTH, MAX_AZIMUTH);
             camera->elevation = clampF(effectiveY * MAX_ELEVATION, -MAX_ELEVATION, MAX_ELEVATION);
 
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
                 lastPrintMs = millis();
-                Serial.printf("[IMU] Accel: %.2f,%.2f,%.2f | Pan: %.1f,%.1f | Az/Elev: %.2f,%.2f\n",
-                              ax, ay, az, camera->panX, camera->panY, camera->azimuth, camera->elevation);
+                Serial.printf("[IMU 3D Orbit] Accel: %.2f,%.2f,%.2f | Azimuth: %.2f rad | Elev: %.2f rad\n",
+                              ax, ay, az, camera->azimuth, camera->elevation);
             }
         }
     }
