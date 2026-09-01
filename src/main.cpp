@@ -45,7 +45,7 @@ void setup() {
 
     // 动态分配模拟器和辅助模块以防栈溢出
     sim = new AtmosphereSimulation();
-    camera = new Camera(67.5f, 90.0f, 4.3f, 5.0f); // 针对 135x195 区域微调
+    camera = new Camera(67.5f, 105.0f, 4.6f, 7.0f); // 针对 135x195 竖屏满屏高空与地面微调
     renderer = new Renderer();
 
     renderer->init(&canvas);

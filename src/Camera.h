@@ -19,15 +19,15 @@ public:
     mutable float _cachedCosE = 1.0f;
     mutable float _cachedSinE = 0.0f;
 
-    Camera(float cx = 67.5f, float cy = 92.0f, float s = 4.8f, float hs = 5.2f)
+    Camera(float cx = 67.5f, float cy = 105.0f, float s = 4.6f, float hs = 7.0f)
         : centerX(cx), centerY(cy), scale(s), heightScale(hs),
           azimuth(0.0f), elevation(0.0f) {}
 
     // 将 3D 物理空间网格坐标 (x, y, z) 严格转换为 3D 轨道球透视屏幕坐标 (screenX, screenY)
-    // 纯旋转无平移模型：
-    // - elevation = 0: 正侧面平视 (用户平视设备，屏幕中也是平视云侧面)
-    // - elevation > 0: 俯视观察云顶 (向前倾斜设备)
-    // - elevation < 0: 仰视观察云底 (向后倾斜设备)
+    // 标准右手 3D 相机坐标变换矩阵：
+    // - elevation = 0: 正平视 (地面在下方 165px，云层在上方 35~110px，雨滴从上往下落向地面)
+    // - elevation > 0: 前倾俯视看云顶 (近端在下，远端在上，云顶覆盖云底)
+    // - elevation < 0: 后仰仰视看云底
     // - azimuth 变化: 左右环绕观察云的左侧与右侧
     void project(float x, float y, float z, int& screenX, int& screenY) const {
         const float gridCenterX = 7.5f;
@@ -36,7 +36,7 @@ public:
         
         float dx = x - gridCenterX;
         float dy = y - gridCenterY;
-        float dz = (z - gridCenterZ) * (heightScale / scale); // 统一几何尺度
+        float dz = (z - gridCenterZ) * (heightScale / scale); // 垂直高度尺度
 
         // 1. 缓存三角函数
         if (azimuth != _lastAzimuth) {
@@ -56,9 +56,9 @@ public:
         float z1 = dz;
 
         // 3. 绕相机水平横轴 X 旋转 elevation (前后俯仰视角)
-        // Y_view 向上为正: 平视(E=0)时 Y_view = z1; 俯视(E>0)时远端 y1>0 向上、近端 y1<0 向下展现云顶
+        // 标准 3D 旋转：yView 向上为正
         float xView = x1;
-        float yView = z1 * _cachedCosE + y1 * _cachedSinE;
+        float yView = y1 * _cachedSinE + z1 * _cachedCosE;
 
         // 4. 投影至 2D 屏幕 (屏幕 Y 向下为正，因此减去 yView * scale)
         screenX = (int)roundf(centerX + xView * scale);
