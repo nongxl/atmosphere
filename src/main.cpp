@@ -145,7 +145,7 @@ void loop() {
             // 左右转动设备 -> 观察云的左侧与右侧 (Azimuth 范围 ±1.4 弧度 ≈ ±80°)
             // 前后转动设备 -> 观察云的顶部与底部 (Elevation 范围 ±1.1 弧度 ≈ ±63°)
             camera->azimuth = clampF(-effRoll * 1.6f, -1.4f, 1.4f);
-            camera->elevation = clampF(effPitch * 1.1f, -1.1f, 1.1f);
+            camera->elevation = clampF(-effPitch * 1.1f, -1.1f, 1.1f);
 
             static uint32_t lastPrintMs = 0;
             if (millis() - lastPrintMs >= 1000) {
