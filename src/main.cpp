@@ -17,6 +17,8 @@ static CloudConfig    cloudConfig;
 static uint8_t  brightnessLevels[] = {30, 60, 120, 200};
 static uint8_t  brightnessIdx      = 1;
 static bool     debugMode          = (CLOUD_DEBUG == 1);
+static uint8_t  presetIdx          = 1; // 默认 1: CLOUD_LIGHT_NATURAL
+static const char* presetNames[]   = {"SOFT", "NATURAL", "DRAMATIC"};
 
 static uint32_t lastFrameMs        = 0;
 static float    currentFps         = 30.0f;
@@ -65,8 +67,12 @@ void loop() {
     // 1. 硬件输入轮询
     M5.update();
 
-    // 按键 A: 切换 Debug 模式 / 注入触碰扰动冲量
-    if (M5.BtnA.wasPressed()) {
+    // 按键 A: 短按切换 Debug 模式并触发冲量；长按切换光照预设 (SOFT/NATURAL/DRAMATIC)
+    if (M5.BtnA.wasHold()) {
+        presetIdx = (presetIdx + 1) % 3;
+        renderer.applyPreset((CloudLightPreset)presetIdx);
+        Serial.printf("[BtnA Hold] Light Preset -> %s\n", presetNames[presetIdx]);
+    } else if (M5.BtnA.wasClicked()) {
         debugMode = !debugMode;
         imu.triggerImpulse(1.2f);
         Serial.printf("[BtnA] Debug mode %s, impulse triggered\n", debugMode ? "ON" : "OFF");

@@ -20,6 +20,7 @@ struct CloudBlob {
     float baseRadius;         // 基准半径 (像素)
     float currentRadius;      // 动态半径 (经独立相位呼吸计算后)
     float phase;              // 独立呼吸相位 (弧度)
+    float depth;              // 前后景深度层次 (-1.0 到 +1.0)
     
     float gravityFactorX;     // 重力局部响应形变因子 X (各 blob 差异化响应)
     float gravityFactorY;     // 重力局部响应形变因子 Y

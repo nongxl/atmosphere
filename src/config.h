@@ -22,6 +22,13 @@ static constexpr uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 // 默认屏幕背光
 static constexpr uint8_t SYSTEM_BRIGHTNESS = 60;
 
+// 光照预设类型
+enum CloudLightPreset {
+    CLOUD_LIGHT_SOFT,       // 柔和微光
+    CLOUD_LIGHT_NATURAL,    // 自然积云 (默认推荐)
+    CLOUD_LIGHT_DRAMATIC    // 强体积与戏剧性深阴影
+};
+
 // 云物理与视觉集中配置
 struct CloudConfig {
     // 基础结构
@@ -44,14 +51,24 @@ struct CloudConfig {
     float shakeThreshold      = 1.5f;       // 晃动判定阈值 (G)
     float shakeImpulse        = 22.0f;      // 晃动注入的最大扰动冲量
     
-    // 渲染与视觉表现
+    // 渲染与形态 (Layer 1: 形状层)
     float sminBlendK          = 13.0f;      // Smooth Union 平滑融合半径
     float edgeSoftness        = 2.0f;       // 边缘抗锯齿与过渡宽度 (像素)
-    float noiseAmount         = 0.035f;     // 内部微弱低频纹理扰动
     
-    // 光照参数 (来自左上方)
-    float lightDirX           = -0.6f;
+    // 光照参数 (Layer 2: 光照层)
+    float lightDirX           = -0.6f;      // 太阳来自左上方
     float lightDirY           = -0.8f;
+    float lightIntensity      = 0.80f;      // 主方向光强度 (设计图: 0.80)
+    float ambientLight        = 0.35f;      // 环境基础光 (设计图: 0.35)
+    
+    // 阴影与遮蔽 (Layer 3: 阴影层 / Ambient Occlusion & Valley Shadow)
+    float shadowStrength      = 0.65f;      // 凹陷与自阴影强度 (设计图: 0.65)
+    float occlusionRadius     = 6.5f;       // 向光采样探测步长 (像素)
+    float bottomShade         = 0.26f;      // 云底垂直宏观渐变遮蔽
+    float depthLightInfluence = 0.12f;      // 前后景 Depth 产生的明暗层次 (±12%)
+    
+    // 细节纹理 (Layer 4: 细节层)
+    float noiseAmount         = 0.065f;     // 低频微弱棉花纤维明暗扰动 (设计图: 0.15~0.25但限制在低频防噪点)
     
     // 背景色彩 (RGB565)
     uint16_t skyTopColor      = 0x22DC;     // 顶部深邃天蓝

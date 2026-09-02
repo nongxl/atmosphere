@@ -18,23 +18,24 @@ void CloudPhysics::init(const CloudConfig& config) {
     _centerVy = 0.0f;
     _timeAccumulator = 0.0f;
 
-    // 经典 8-Blob 蓬松立体卡通云朵拓扑布局
+    // 经典 8-Blob 蓬松立体卡通云朵拓扑布局 (含前后景 Depth 层次)
     struct BlobInit {
         float bx, by;
         float radius;
         float phase;
+        float depth;
         float factorX, factorY;
     };
 
     static const BlobInit initLayout[CloudConfig::BLOB_COUNT] = {
-        {   0.0f,   1.5f, 15.0f, 0.00f, 1.00f, 1.00f }, // 0: 云心主核
-        { -17.0f,   3.0f, 12.0f, 1.15f, 1.12f, 0.95f }, // 1: 左中主凸起
-        {  18.0f,   3.5f, 12.5f, 2.30f, 1.18f, 1.05f }, // 2: 右中主凸起
-        {  -5.0f,  -9.5f, 13.0f, 3.45f, 0.92f, 1.20f }, // 3: 顶部主峰
-        {  10.0f,  -6.5f, 11.0f, 4.60f, 1.05f, 1.10f }, // 4: 右上次峰
-        { -30.0f,   5.0f,  9.0f, 5.75f, 1.30f, 0.85f }, // 5: 最左侧软翼
-        {  31.0f,   5.5f,  9.5f, 0.80f, 1.35f, 0.90f }, // 6: 最右侧软翼
-        {   1.0f,   8.5f, 11.0f, 2.05f, 1.00f, 0.80f }  // 7: 底部平坦支撑垫
+        {   0.0f,   1.5f, 15.0f, 0.00f,  0.60f, 1.00f, 1.00f }, // 0: 云心主核 (前景)
+        { -17.0f,   3.0f, 12.0f, 1.15f,  0.85f, 1.12f, 0.95f }, // 1: 左中主凸起 (向阳最前景)
+        {  18.0f,   3.5f, 12.5f, 2.30f,  0.40f, 1.18f, 1.05f }, // 2: 右中主凸起 (前中景)
+        {  -5.0f,  -9.5f, 13.0f, 3.45f,  0.75f, 0.92f, 1.20f }, // 3: 顶部主峰 (向阳光照前景)
+        {  10.0f,  -6.5f, 11.0f, 4.60f, -0.20f, 1.05f, 1.10f }, // 4: 右上次峰 (中后景)
+        { -30.0f,   5.0f,  9.0f, 5.75f, -0.45f, 1.30f, 0.85f }, // 5: 最左侧软翼 (侧后景)
+        {  31.0f,   5.5f,  9.5f, 0.80f, -0.65f, 1.35f, 0.90f }, // 6: 最右侧软翼 (背阳后景)
+        {   1.0f,   8.5f, 11.0f, 2.05f, -0.80f, 1.00f, 0.80f }  // 7: 底部平坦支撑垫 (后景底垫)
     };
 
     for (int i = 0; i < CloudConfig::BLOB_COUNT; ++i) {
@@ -43,6 +44,7 @@ void CloudPhysics::init(const CloudConfig& config) {
         _blobs[i].baseRadius = initLayout[i].radius;
         _blobs[i].currentRadius = initLayout[i].radius;
         _blobs[i].phase = initLayout[i].phase;
+        _blobs[i].depth = initLayout[i].depth;
         _blobs[i].gravityFactorX = initLayout[i].factorX;
         _blobs[i].gravityFactorY = initLayout[i].factorY;
 
